@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "StudyPilot",
+  "short_name": "StudyPilot",
+  "version": "0.1.0",
+  "description": "A calm study companion for asking questions about the page, saving explanations, and reviewing sessions later.",
+  "minimum_chrome_version": "116",
+  "action": {
+    "default_title": "Open StudyPilot",
+    "default_popup": "src/popup/index.html"
+  },
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/content/index.tsx"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["activeTab"],
+  "host_permissions": [],
+  "icons": {
+    "16": "public/icons/icon-128.png",
+    "32": "public/icons/icon-128.png",
+    "48": "public/icons/icon-128.png",
+    "128": "public/icons/icon-128.png"
+  }
+}
