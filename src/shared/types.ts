@@ -68,3 +68,7 @@ export interface CaptureVisibleTabResult {
   pageTitle: string;
   pageUrl: string;
 }
+
+export interface GeminiQueryResult {
+  answer: string;
+}

@@ -6,6 +6,7 @@ import {
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
 import type { CaptureVisibleTabResult, PageContext } from '@/shared/types';
+import { handleGeminiBackgroundRequest } from '@/shared/geminiService';
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[StudyPilot] MVP installed. Floating UI is injected on http/https pages.');
@@ -64,11 +65,61 @@ chrome.runtime.onMessage.addListener(
       case 'STUDYPILOT_OPEN_MODAL':
         return false;
 
+      // -----------------------------------------------------------------------
+      // Gemini: collect the full streamed answer, then send it back in one shot.
+      //
+      // True streaming over chrome.runtime requires a long-lived Port
+      // (chrome.runtime.connect). For the MVP, we accumulate here and respond
+      // once — the round-trip is fast enough on flash that users won't notice.
+      // Switch to a Port if you want token-by-token UI updates later.
+      // -----------------------------------------------------------------------
+      case 'STUDYPILOT_GEMINI_QUERY':
+        handleGeminiQuery(message.payload)
+          .then(answer => sendResponse({ ok: true, data: { answer } }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true; // keep the message channel open for the async response
+
       default:
         return false;
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Gemini handler — accumulates streamed chunks into a single string
+// ---------------------------------------------------------------------------
+
+async function handleGeminiQuery(
+  payload: Extract<
+    StudyPilotRuntimeMessage,
+    { type: 'STUDYPILOT_GEMINI_QUERY' }
+  >['payload'],
+): Promise<string> {
+  let answer = '';
+
+  await handleGeminiBackgroundRequest(
+    {
+      type: payload.requestType,
+      imageDataUrl: payload.imageDataUrl,
+      question: payload.question,
+      context: payload.context,
+    },
+    chunk => {
+      answer += chunk.text;
+    },
+  );
+
+  return answer;
+}
+
+// ---------------------------------------------------------------------------
+// Existing helpers — unchanged
+// ---------------------------------------------------------------------------
 
 function getPageContextFromSender(sender: chrome.runtime.MessageSender): PageContext {
   const tab = sender.tab;
@@ -89,8 +140,6 @@ async function captureVisibleTab(
     throw new Error('Open StudyPilot on a page before capturing a screenshot.');
   }
 
-  // TODO: Wire this into the UI when moving beyond the simulated screenshot.
-  // chrome.tabs.captureVisibleTab requires user activation and activeTab access.
   const dataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
     format: 'png',
   });
