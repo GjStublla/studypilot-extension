@@ -39,17 +39,16 @@ import {
 } from '@/shared/extensionMessages';
 import {
   STUDY_FOLDERS,
+  type CaptureVisibleTabResult,
   type ContextShareSettings,
   type DashboardSaveResult,
+  type GeminiQueryResult,
   type PageContext,
   type StudyAction,
   type StudyFolder,
   type StudyPilotStatus,
   type StudyPilotView,
 } from '@/shared/types';
-
-const MOCK_ANSWER =
-  'Photosynthesis converts light energy into chemical energy. Plants use light, water, and carbon dioxide to produce glucose and oxygen. It happens in two main stages: the light-dependent reactions make ATP and NADPH, then the Calvin cycle fixes CO2 into glucose.';
 
 const STATUS_COPY: Record<StudyPilotStatus, string> = {
   ready: 'Ready',
@@ -103,8 +102,10 @@ export function FloatingStudyPilot() {
   const [status, setStatus] = useState<StudyPilotStatus>('ready');
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState(MOCK_ANSWER);
+  const [answer, setAnswer] = useState('');
   const [lastQuestion, setLastQuestion] = useState('Ask anything about this page');
+  const [capturedScreenshot, setCapturedScreenshot] =
+    useState<CaptureVisibleTabResult | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLivePaused, setIsLivePaused] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
@@ -116,7 +117,7 @@ export function FloatingStudyPilot() {
     saveToDashboard: true,
     folder: 'Biology 101',
   });
-  const thinkingTimer = useRef<number | undefined>(undefined);
+  const requestId = useRef(0);
 
   useEffect(() => {
     const refreshSelection = () => {
@@ -151,7 +152,7 @@ export function FloatingStudyPilot() {
 
   useEffect(() => {
     return () => {
-      if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
+      requestId.current += 1;
     };
   }, []);
 
@@ -166,13 +167,34 @@ export function FloatingStudyPilot() {
     setIsLivePaused(false);
   }
 
-  function captureScreenshot() {
-    // TODO: Replace this simulated state with a background call to
-    // chrome.tabs.captureVisibleTab once activeTab user activation is designed.
-    setContext(prev => ({ ...prev, screenshot: true }));
-    setView('screenshot');
-    setStatus('screenshot-ready');
+  async function captureScreenshot() {
     setIsOpen(true);
+    setView('thinking');
+    setStatus('explaining');
+
+    try {
+      const capture = await sendRuntimeMessage<CaptureVisibleTabResult>({
+        type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
+      });
+
+      if (!capture) {
+        throw new Error('Screenshot capture is only available inside the installed extension.');
+      }
+
+      setCapturedScreenshot(capture);
+      setPage(prev => ({
+        ...prev,
+        sourceTitle: capture.pageTitle || prev.sourceTitle,
+        sourceUrl: capture.pageUrl || prev.sourceUrl,
+      }));
+      setContext(prev => ({ ...prev, screenshot: true }));
+      setView('screenshot');
+      setStatus('screenshot-ready');
+    } catch (error) {
+      setAnswer(error instanceof Error ? error.message : String(error));
+      setView('answer');
+      setStatus('ready');
+    }
   }
 
   function startLiveSharing() {
@@ -185,21 +207,47 @@ export function FloatingStudyPilot() {
     setIsOpen(true);
   }
 
-  function runStudyAction(action: StudyAction, customQuestion?: string) {
-    if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
-
+  async function runStudyAction(action: StudyAction, customQuestion?: string) {
     const nextQuestion =
       customQuestion?.trim() || `${ACTION_COPY[action]} this page`;
+    const currentRequest = requestId.current + 1;
+    requestId.current = currentRequest;
+
     setLastQuestion(nextQuestion);
+    setAnswer('');
     setView('thinking');
     setStatus('explaining');
     setIsOpen(true);
 
-    thinkingTimer.current = window.setTimeout(() => {
-      setAnswer(answerForAction(action, nextQuestion));
+    try {
+      const imageDataUrl =
+        context.screenshot && capturedScreenshot
+          ? capturedScreenshot.dataUrl
+          : undefined;
+      const response = await sendRuntimeMessage<GeminiQueryResult>({
+        type: 'STUDYPILOT_GEMINI_QUERY',
+        payload: {
+          requestType: imageDataUrl ? 'screenshot' : 'question',
+          imageDataUrl,
+          question: promptForAction(action, nextQuestion),
+          context: buildQuestionContext(page, context),
+        },
+      });
+
+      if (requestId.current !== currentRequest) return;
+      if (!response?.answer.trim()) {
+        throw new Error('The API returned an empty answer.');
+      }
+
+      setAnswer(response.answer.trim());
       setView('answer');
       setStatus('ready');
-    }, 850);
+    } catch (error) {
+      if (requestId.current !== currentRequest) return;
+      setAnswer(error instanceof Error ? error.message : String(error));
+      setView('answer');
+      setStatus('ready');
+    }
   }
 
   async function sendToDashboard() {
@@ -352,6 +400,7 @@ export function FloatingStudyPilot() {
               <AnswerPanel
                 view={view}
                 answer={answer}
+                title={lastQuestion}
                 savedFolder={savedFolder}
                 isSaving={isSaving}
                 onSave={sendToDashboard}
@@ -622,6 +671,7 @@ function ActionChip({
 function AnswerPanel({
   view,
   answer,
+  title,
   savedFolder,
   isSaving,
   onSave,
@@ -629,6 +679,7 @@ function AnswerPanel({
 }: {
   view: StudyPilotView;
   answer: string;
+  title: string;
   savedFolder: StudyFolder;
   isSaving: boolean;
   onSave: () => void;
@@ -641,14 +692,14 @@ function AnswerPanel({
       <div className="sp-answer-head">
         <div>
           <strong>
-            {isSaved ? `Saved to ${savedFolder}` : 'Photosynthesis explained'}
+            {isSaved ? `Saved to ${savedFolder}` : title}
           </strong>
           <span>{isSaved ? 'Ready in dashboard' : 'Just now'}</span>
         </div>
         <ChevronDown size={22} />
       </div>
 
-      <p>{answer}</p>
+      <p>{answer || 'Ask a question or choose an action to get an API answer.'}</p>
 
       <div className="sp-answer-actions">
         <button type="button" aria-label="Read answer aloud">
@@ -812,18 +863,36 @@ function stageSubtitle(view: StudyPilotView): string {
   }
 }
 
-function answerForAction(action: StudyAction, question: string): string {
+function promptForAction(action: StudyAction, question: string): string {
   switch (action) {
     case 'summarize':
-      return 'Quick summary: this page is introducing the main idea, then using the visible example to make it concrete. Save the definition, the example, and one question you still have.';
+      return 'Summarize the page or screenshot in a concise study-friendly way. Focus on the main idea, key details, and anything worth reviewing.';
     case 'quiz':
-      return 'Quiz time: what is the main concept on screen, which detail supports it, and what would change if one condition in the example changed?';
+      return 'Create a short quiz from the page or screenshot. Include 3 questions and the answers.';
     case 'flashcards':
-      return 'Flashcards drafted: Front: What is the main idea here? Back: Explain the concept in your own words. Front: Why does the example matter? Back: It shows how the idea works in a real case.';
+      return 'Create 4 concise flashcards from the page or screenshot. Format each as Front and Back.';
     case 'step-by-step':
-      return 'Step by step: identify the title, underline the main claim, connect each visual to that claim, then write one sentence explaining why it matters.';
+      return 'Explain the page or screenshot step by step for a student who is learning it for the first time.';
     case 'explain':
     default:
-      return `${question}: ${MOCK_ANSWER}`;
+      return question;
   }
+}
+
+function buildQuestionContext(
+  page: PageContext,
+  context: ContextShareSettings,
+): string {
+  const lines: string[] = [];
+
+  if (context.pageUrl) {
+    lines.push(`Page title: ${page.sourceTitle}`);
+    lines.push(`Page URL: ${page.sourceUrl}`);
+  }
+
+  if (context.selectedText && page.selectedText) {
+    lines.push(`Selected text: ${page.selectedText}`);
+  }
+
+  return lines.join('\n');
 }

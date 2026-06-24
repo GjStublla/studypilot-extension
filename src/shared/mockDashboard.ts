@@ -5,6 +5,15 @@ import type {
   StudySession,
 } from './types';
 
+
+// ---------------------------------------------------------------------------
+// Config — set VITE_DASHBOARD_API_URL in .env to point at your backend.
+// The extension client never holds dashboard API keys directly; the backend
+// owns auth and persists sessions.
+// ---------------------------------------------------------------------------
+
+const API_BASE = import.meta.env.VITE_DASHBOARD_API_URL as string | undefined;
+
 export const DASHBOARD_URL = 'https://app.studypilot.ai/sessions';
 
 interface MockSessionInput {
@@ -16,7 +25,9 @@ interface MockSessionInput {
   tags?: string[];
 }
 
-const delay = (ms: number) => new Promise(resolve => globalThis.setTimeout(resolve, ms));
+// ------------------------------------------
+// Real save — POST /sessions to your backend
+// -----------------------------------------
 
 export function createMockStudySession(input: MockSessionInput): StudySession {
   return {
@@ -35,14 +46,35 @@ export function createMockStudySession(input: MockSessionInput): StudySession {
 
 export async function saveStudySession(
   session: StudySession,
+  authToken?: string,
 ): Promise<DashboardSaveResult> {
-  // TODO: Replace this mock with a real dashboard API call from a trusted
-  // backend. Do not put dashboard API keys in the extension client.
-  await delay(500);
+  if (!API_BASE) {
+    return {
+      ok: true,
+      session,
+      dashboardUrl: DASHBOARD_URL,
+    };
+  }
+
+  const response = await fetch(`${API_BASE}/sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+    },
+    body: JSON.stringify(session),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText);
+    throw new Error(`[StudyPilot] Dashboard API error ${response.status}: ${text}`);
+  }
+
+  const data = (await response.json()) as { session: StudySession; dashboardUrl: string };
 
   return {
     ok: true,
-    session,
-    dashboardUrl: DASHBOARD_URL,
+    session: data.session,
+    dashboardUrl: data.dashboardUrl,
   };
 }

@@ -21,7 +21,7 @@
     }
   ],
   "permissions": ["activeTab"],
-  "host_permissions": [],
+  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
   "icons": {
     "16": "public/icons/icon-128.png",
     "32": "public/icons/icon-128.png",
