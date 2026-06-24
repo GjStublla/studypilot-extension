@@ -26,7 +26,13 @@ import {
   Volume2,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
+import type {
+  ChangeEvent,
+  Dispatch,
+  KeyboardEvent,
+  ReactNode,
+  SetStateAction,
+} from 'react';
 import symbolLogoUrl from '../../02_symbol_mark_transparent.png';
 import {
   DASHBOARD_URL,
@@ -297,7 +303,12 @@ export function FloatingStudyPilot() {
   }
 
   return (
-    <div className="sp-extension" data-view={view}>
+    <div
+      className="sp-extension"
+      data-view={view}
+      onKeyDownCapture={stopPageKeyboardShortcuts}
+      onKeyUpCapture={stopPageKeyboardShortcuts}
+    >
       <AnimatePresence>
         {!isOpen ? (
           <motion.button
@@ -425,6 +436,10 @@ export function FloatingStudyPilot() {
       </AnimatePresence>
     </div>
   );
+}
+
+function stopPageKeyboardShortcuts(event: KeyboardEvent): void {
+  event.stopPropagation();
 }
 
 function StudyStage({

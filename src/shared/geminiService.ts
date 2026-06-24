@@ -29,8 +29,13 @@ const GENERATION_CONFIG: GenerationConfig = {
   maxOutputTokens: 1024,
 };
 
-const VISION_MODEL = "gemini-1.5-flash";
-const TEXT_MODEL = "gemini-1.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+const VISION_MODEL =
+  (import.meta.env.VITE_GEMINI_VISION_MODEL as string | undefined) ??
+  DEFAULT_GEMINI_MODEL;
+const TEXT_MODEL =
+  (import.meta.env.VITE_GEMINI_TEXT_MODEL as string | undefined) ??
+  DEFAULT_GEMINI_MODEL;
 
 // ---------------------------------------------------------------------------
 // Types
