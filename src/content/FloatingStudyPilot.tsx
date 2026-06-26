@@ -11,7 +11,6 @@ import {
   HelpCircle,
   Lightbulb,
   Mic,
-  MoreVertical,
   Pause,
   Pin,
   Play,
@@ -24,6 +23,7 @@ import {
   ThumbsUp,
   Type,
   Volume2,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
@@ -367,7 +367,7 @@ export function FloatingStudyPilot() {
                   aria-label="Close StudyPilot"
                   onClick={() => setIsOpen(false)}
                 >
-                  <MoreVertical size={25} strokeWidth={2.3} />
+                  <X size={20} strokeWidth={2.2} />
                 </button>
               </div>
             </header>
