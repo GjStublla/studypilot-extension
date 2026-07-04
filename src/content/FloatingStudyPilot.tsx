@@ -1,33 +1,28 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  BookOpen,
+  BookmarkCheck,
   Camera,
-  CheckCircle2,
+  Check,
   ChevronDown,
   Copy,
   Crown,
   ExternalLink,
-  FileText,
-  HelpCircle,
-  Lightbulb,
   Mic,
+  MicOff,
+  Minus,
   MoreVertical,
   Pause,
   Pin,
   Play,
-  RotateCcw,
   Send,
   Settings,
   ShieldCheck,
-  Square,
   ThumbsDown,
   ThumbsUp,
-  Type,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
-import symbolLogoUrl from '../../02_symbol_mark_transparent.png';
 import {
   DASHBOARD_URL,
   createMockStudySession,
@@ -44,28 +39,18 @@ import {
   type PageContext,
   type StudyAction,
   type StudyFolder,
-  type StudyPilotStatus,
-  type StudyPilotView,
+  type StudyPhase,
 } from '@/shared/types';
 
 const MOCK_ANSWER =
-  'Photosynthesis converts light energy into chemical energy. Plants use light, water, and carbon dioxide to produce glucose and oxygen. It happens in two main stages: the light-dependent reactions make ATP and NADPH, then the Calvin cycle fixes CO2 into glucose.';
+  'Photosynthesis converts light energy into chemical energy. Plants use light, water, and carbon dioxide to produce glucose and oxygen. It occurs in two main stages: the light-dependent reactions (producing ATP and NADPH) and the Calvin cycle (fixing CO₂ into glucose).';
 
-const STATUS_COPY: Record<StudyPilotStatus, string> = {
-  ready: 'Ready',
-  'screenshot-ready': 'Screenshot ready',
-  'live-sharing': 'Live sharing',
-  explaining: 'Explaining',
-  saved: 'Saved',
-};
+interface AnswerCard {
+  title: string;
+  body: string;
+}
 
-const ACTION_COPY: Record<StudyAction, string> = {
-  explain: 'Explain',
-  summarize: 'Summarize',
-  quiz: 'Quiz Me',
-  flashcards: 'Flashcards',
-  'step-by-step': 'Steps',
-};
+type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
 
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
@@ -97,18 +82,33 @@ async function sendRuntimeMessage<T>(
   return response.data as T;
 }
 
-export function FloatingStudyPilot() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [view, setView] = useState<StudyPilotView>('idle');
-  const [status, setStatus] = useState<StudyPilotStatus>('ready');
+export function FloatingStudyPilot({
+  defaultOpen = false,
+}: {
+  defaultOpen?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isPinned, setIsPinned] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [micOn, setMicOn] = useState(true);
+  const [paused, setPaused] = useState(false);
+  const [phase, setPhase] = useState<StudyPhase>('idle');
+  const [notice, setNotice] = useState<string | null>(null);
+
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState(MOCK_ANSWER);
-  const [lastQuestion, setLastQuestion] = useState('Ask anything about this page');
+  const [card, setCard] = useState<AnswerCard>({
+    title: 'Photosynthesis explained',
+    body: MOCK_ANSWER,
+  });
+  const [cardOpen, setCardOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLivePaused, setIsLivePaused] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [savedFolder, setSavedFolder] = useState<StudyFolder>('Biology 101');
+
   const [context, setContext] = useState<ContextShareSettings>({
     screenshot: true,
     pageUrl: true,
@@ -116,12 +116,12 @@ export function FloatingStudyPilot() {
     saveToDashboard: true,
     folder: 'Biology 101',
   });
+
   const thinkingTimer = useRef<number | undefined>(undefined);
+  const noticeTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    const refreshSelection = () => {
-      setPage(getPageContext());
-    };
+    const refreshSelection = () => setPage(getPageContext());
 
     document.addEventListener('selectionchange', refreshSelection);
     window.addEventListener('focus', refreshSelection);
@@ -136,12 +136,9 @@ export function FloatingStudyPilot() {
     if (!isExtensionRuntime()) return;
 
     const listener = (message: unknown) => {
-      if (
-        isStudyPilotRuntimeMessage(message) &&
-        message.type === 'STUDYPILOT_OPEN_MODAL'
-      ) {
-        setIsOpen(true);
-      }
+      if (!isStudyPilotRuntimeMessage(message)) return false;
+      if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
+      if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen(value => !value);
       return false;
     };
 
@@ -150,67 +147,84 @@ export function FloatingStudyPilot() {
   }, []);
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMenuOpen(false);
+      if (!isPinned) setIsOpen(false);
+    };
+
+    if (isOpen) document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isPinned]);
+
+  useEffect(() => {
     return () => {
       if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
 
+  const orbState: OrbState = phase === 'thinking'
+    ? 'thinking'
+    : paused
+      ? 'paused'
+      : micOn
+        ? 'listening'
+        : 'muted';
+
+  const statusText = notice
+    ? notice
+    : phase === 'thinking'
+      ? 'Thinking...'
+      : paused
+        ? 'Paused'
+        : micOn
+          ? 'Listening...'
+          : 'Mic muted';
+
   const sourceLabel = useMemo(() => {
-    if (!page.host) return 'Current page';
-    return `${page.host} - ${page.sourceTitle}`;
-  }, [page.host, page.sourceTitle]);
+    if (!page.host) return 'this page';
+    return page.host;
+  }, [page.host]);
 
-  function resetToIdle() {
-    setView('idle');
-    setStatus('ready');
-    setIsLivePaused(false);
-  }
-
-  function captureScreenshot() {
-    // TODO: Replace this simulated state with a background call to
-    // chrome.tabs.captureVisibleTab once activeTab user activation is designed.
-    setContext(prev => ({ ...prev, screenshot: true }));
-    setView('screenshot');
-    setStatus('screenshot-ready');
-    setIsOpen(true);
-  }
-
-  function startLiveSharing() {
-    // TODO: Connect navigator.mediaDevices.getDisplayMedia through an explicit
-    // browser permission prompt when live help moves beyond the MVP mock.
-    setView('live');
-    setStatus('live-sharing');
-    setIsLivePaused(false);
-    setIsMicOn(true);
-    setIsOpen(true);
+  function flashNotice(text: string, duration = 2200) {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
   }
 
   function runStudyAction(action: StudyAction, customQuestion?: string) {
     if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
 
-    const nextQuestion =
-      customQuestion?.trim() || `${ACTION_COPY[action]} this page`;
-    setLastQuestion(nextQuestion);
-    setView('thinking');
-    setStatus('explaining');
-    setIsOpen(true);
+    setPhase('thinking');
+    setFeedback(null);
+    setCopied(false);
 
     thinkingTimer.current = window.setTimeout(() => {
-      setAnswer(answerForAction(action, nextQuestion));
-      setView('answer');
-      setStatus('ready');
-    }, 850);
+      setCard(cardForAction(action, customQuestion));
+      setCardOpen(true);
+      setPhase('answer');
+      flashNotice('Answer ready');
+    }, 950);
   }
 
-  async function sendToDashboard() {
-    if (!context.saveToDashboard || isSaving) return;
+  function handleSubmit() {
+    const text = question.trim();
+    if (!text) return;
+    setQuestion('');
+    runStudyAction('explain', text);
+  }
+
+  async function saveToDashboard() {
+    if (isSaving) return;
 
     setIsSaving(true);
     const session = createMockStudySession({
       page,
       folder: context.folder,
-      question: lastQuestion,
-      answer,
+      question: card.title,
+      answer: card.body,
       screenshotUrl: context.screenshot ? 'mock://studypilot/screenshot' : undefined,
       tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
     });
@@ -222,9 +236,10 @@ export function FloatingStudyPilot() {
       });
 
       if (!response) await saveStudySession(session);
-      setSavedFolder(session.folder);
-      setView('saved');
-      setStatus('saved');
+      setPhase('saved');
+      flashNotice(`Saved to ${session.folder}`, 2600);
+    } catch {
+      flashNotice('Could not save right now');
     } finally {
       setIsSaving(false);
     }
@@ -241,34 +256,77 @@ export function FloatingStudyPilot() {
     }
   }
 
-  function handleSubmit() {
-    const text = question.trim();
-    if (!text) return;
-    setQuestion('');
-    runStudyAction('explain', text);
+  function captureSnapshot() {
+    // TODO: Replace the simulated snapshot with chrome.tabs.captureVisibleTab
+    // through the background worker once the real capture flow is designed.
+    setContext(prev => ({ ...prev, screenshot: true }));
+    flashNotice('Snapshot added to context');
+  }
+
+  function speakAnswer() {
+    if (!('speechSynthesis' in window)) return;
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(card.body);
+    utterance.rate = 1.02;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  }
+
+  async function copyAnswer() {
+    try {
+      await navigator.clipboard.writeText(card.body);
+    } catch {
+      const scratch = document.createElement('textarea');
+      scratch.value = card.body;
+      scratch.style.position = 'fixed';
+      scratch.style.opacity = '0';
+      document.body.appendChild(scratch);
+      scratch.select();
+      document.execCommand('copy');
+      scratch.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  function toggleMic() {
+    setMicOn(value => {
+      const next = !value;
+      if (next) setPaused(false);
+      return next;
+    });
   }
 
   return (
-    <div className="sp-extension" data-view={view}>
+    <div className="sp-extension">
       <AnimatePresence>
         {!isOpen ? (
           <motion.button
-            key="orb"
+            key="launcher"
             type="button"
-            className="sp-orb-button"
-            aria-label="Open StudyPilot"
+            className="sp-launcher"
+            aria-label="Open Study Pilot"
+            title={`Study Pilot — ask about ${sourceLabel}`}
             onClick={() => setIsOpen(true)}
-            initial={{ opacity: 0, y: 12, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.96 }}
+            initial={{ opacity: 0, scale: 0.8, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 8 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           >
-            <span className="sp-orb-mark" data-status={status}>
-              <img src={symbolLogoUrl} alt="" />
-            </span>
-            <span className="sp-orb-copy">
-              <span className="sp-orb-name">Study Pilot</span>
-              <span className="sp-orb-status">{STATUS_COPY[status]}</span>
+            <span className="sp-launcher-ring" aria-hidden="true" />
+            <span className="sp-launcher-wave" aria-hidden="true">
+              <i />
+              <i />
+              <i />
             </span>
           </motion.button>
         ) : null}
@@ -277,97 +335,287 @@ export function FloatingStudyPilot() {
       <AnimatePresence>
         {isOpen ? (
           <motion.section
-            key="modal"
-            className="sp-modal"
+            key="panel"
+            className="sp-panel"
             role="dialog"
-            aria-label="StudyPilot study companion"
-            initial={{ opacity: 0, y: 18, scale: 0.985 }}
+            aria-label="Study Pilot"
+            initial={{ opacity: 0, y: 26, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.985 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
           >
             <header className="sp-header">
               <div className="sp-brand">
-                <img className="sp-brand-logo" src={symbolLogoUrl} alt="" />
-                <div className="sp-brand-text">
-                  <strong>Study Pilot</strong>
-                  <span title={sourceLabel}>{sourceLabel}</span>
-                </div>
+                <SparkleLogo size={30} />
+                <strong>Study Pilot</strong>
               </div>
               <div className="sp-header-actions">
                 <button
                   type="button"
-                  className="sp-top-icon"
-                  aria-label="Pin StudyPilot"
+                  className="sp-icon-button"
+                  data-active={isPinned}
+                  aria-label={isPinned ? 'Unpin Study Pilot' : 'Pin Study Pilot'}
+                  aria-pressed={isPinned}
+                  onClick={() => setIsPinned(value => !value)}
                 >
-                  <Pin size={22} strokeWidth={1.8} />
+                  <Pin size={19} strokeWidth={1.9} />
                 </button>
                 <button
                   type="button"
-                  className="sp-top-icon"
-                  aria-label="Close StudyPilot"
-                  onClick={() => setIsOpen(false)}
+                  className="sp-icon-button"
+                  aria-label="More options"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen(value => !value)}
                 >
-                  <MoreVertical size={25} strokeWidth={2.3} />
+                  <MoreVertical size={20} strokeWidth={2} />
                 </button>
               </div>
+
+              <AnimatePresence>
+                {menuOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      className="sp-menu-backdrop"
+                      aria-label="Close menu"
+                      onClick={() => setMenuOpen(false)}
+                    />
+                    <motion.div
+                      className="sp-menu"
+                      role="menu"
+                      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                      transition={{ duration: 0.14 }}
+                    >
+                      <MenuItem
+                        icon={<Camera size={16} />}
+                        label="Capture snapshot"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          captureSnapshot();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<BookmarkCheck size={16} />}
+                        label={isSaving ? 'Saving…' : 'Save to dashboard'}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void saveToDashboard();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<ExternalLink size={16} />}
+                        label="Open dashboard"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void openDashboard();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<Minus size={16} />}
+                        label="Minimize"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setIsOpen(false);
+                        }}
+                      />
+                    </motion.div>
+                  </>
+                ) : null}
+              </AnimatePresence>
             </header>
 
-            <div className="sp-modal-body">
-              <StudyStage
-                view={view}
-                savedFolder={savedFolder}
-                isLivePaused={isLivePaused}
-              />
+            <motion.div
+              className="sp-body"
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: {},
+                show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
+              }}
+            >
+              <motion.section className="sp-stage" variants={sectionReveal} aria-live="polite">
+                <span className="sp-presence-dot" aria-hidden="true" />
+                <Orb state={orbState} />
+                <p className="sp-status" data-state={orbState}>
+                  {statusText}
+                </p>
+                <h2 className="sp-headline">Ask anything about this page</h2>
+              </motion.section>
 
-              <VoiceControls
-                view={view}
-                isMicOn={isMicOn}
-                isLivePaused={isLivePaused}
-                onMicToggle={() => setIsMicOn(value => !value)}
-                onListen={startLiveSharing}
-                onPause={() => setIsLivePaused(value => !value)}
-                onSettings={captureScreenshot}
-              />
+              <motion.div className="sp-voice-dock" variants={sectionReveal}>
+                <RoundButton
+                  active={micOn && !paused}
+                  label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+                  onClick={toggleMic}
+                >
+                  {micOn ? <Mic size={22} /> : <MicOff size={22} />}
+                </RoundButton>
+                <RoundButton
+                  active={isSpeaking}
+                  label={isSpeaking ? 'Stop reading aloud' : 'Read answer aloud'}
+                  onClick={speakAnswer}
+                >
+                  <Volume2 size={22} />
+                </RoundButton>
+                <RoundButton
+                  active={false}
+                  label={paused ? 'Resume session' : 'Pause session'}
+                  onClick={() => setPaused(value => !value)}
+                >
+                  {paused ? <Play size={22} /> : <Pause size={22} />}
+                </RoundButton>
+                <RoundButton
+                  active={settingsOpen}
+                  tinted
+                  label="Session settings"
+                  onClick={() => setSettingsOpen(value => !value)}
+                >
+                  <Settings size={22} />
+                </RoundButton>
+              </motion.div>
 
-              <Composer
-                question={question}
-                onQuestionChange={setQuestion}
-                onSubmit={handleSubmit}
-              />
+              <AnimatePresence initial={false}>
+                {settingsOpen ? (
+                  <motion.div
+                    key="settings"
+                    className="sp-settings-wrap"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <SettingsSheet
+                      page={page}
+                      context={context}
+                      onChange={setContext}
+                      onOpenDashboard={() => void openDashboard()}
+                    />
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
-              <QuickActions
-                isSaving={isSaving}
-                saveEnabled={context.saveToDashboard && !isSaving}
-                view={view}
-                onSummarize={() => runStudyAction('summarize')}
-                onExplain={() => runStudyAction('explain')}
-                onQuiz={() => runStudyAction('quiz')}
-                onFlashcards={() => runStudyAction('flashcards')}
-                onSave={sendToDashboard}
-                onRetake={captureScreenshot}
-                onStop={resetToIdle}
-              />
+              <motion.div className="sp-composer" variants={sectionReveal}>
+                <input
+                  type="text"
+                  value={question}
+                  placeholder="Ask a question or say something..."
+                  aria-label="Ask a question"
+                  onChange={event => setQuestion(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="sp-send"
+                  aria-label="Send question"
+                  onClick={handleSubmit}
+                  disabled={!question.trim()}
+                >
+                  <Send size={17} strokeWidth={2} fill="currentColor" />
+                </button>
+              </motion.div>
 
-              <AnswerPanel
-                view={view}
-                answer={answer}
-                savedFolder={savedFolder}
-                isSaving={isSaving}
-                onSave={sendToDashboard}
-                onOpenDashboard={openDashboard}
-              />
+              <motion.div className="sp-chips" variants={sectionReveal}>
+                <QuickChip label="Summarize" onClick={() => runStudyAction('summarize')}>
+                  <SummarizeGlyph />
+                </QuickChip>
+                <QuickChip label="Explain" onClick={() => runStudyAction('explain')}>
+                  <ExplainGlyph />
+                </QuickChip>
+                <QuickChip label="Quiz Me" onClick={() => runStudyAction('quiz')}>
+                  <QuizGlyph />
+                </QuickChip>
+                <QuickChip label="Flashcards" onClick={() => runStudyAction('flashcards')}>
+                  <FlashcardsGlyph />
+                </QuickChip>
+              </motion.div>
 
-              <ContextRail
-                page={page}
-                context={context}
-                onChange={setContext}
-              />
-            </div>
+              <motion.section
+                className="sp-card"
+                variants={sectionReveal}
+                data-thinking={phase === 'thinking'}
+              >
+                <button
+                  type="button"
+                  className="sp-card-head"
+                  aria-expanded={cardOpen}
+                  onClick={() => setCardOpen(value => !value)}
+                >
+                  <strong>{card.title}</strong>
+                  <span className="sp-card-time">Just now</span>
+                  <ChevronDown
+                    size={20}
+                    className="sp-card-chevron"
+                    data-open={cardOpen}
+                    aria-hidden="true"
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {cardOpen ? (
+                    <motion.div
+                      key="card-body"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <p className="sp-card-body">{card.body}</p>
+                      <div className="sp-card-actions">
+                        <button
+                          type="button"
+                          aria-label={isSpeaking ? 'Stop reading aloud' : 'Read aloud'}
+                          data-active={isSpeaking}
+                          onClick={speakAnswer}
+                        >
+                          <Volume2 size={19} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Copy answer"
+                          onClick={() => void copyAnswer()}
+                        >
+                          {copied ? <Check size={19} /> : <Copy size={19} />}
+                        </button>
+                        <span className="sp-card-spacer" />
+                        <button
+                          type="button"
+                          aria-label="Helpful"
+                          data-feedback="up"
+                          data-active={feedback === 'up'}
+                          onClick={() => setFeedback(value => (value === 'up' ? null : 'up'))}
+                        >
+                          <ThumbsUp size={19} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Not helpful"
+                          data-feedback="down"
+                          data-active={feedback === 'down'}
+                          onClick={() => setFeedback(value => (value === 'down' ? null : 'down'))}
+                        >
+                          <ThumbsDown size={19} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </motion.section>
+            </motion.div>
 
             <footer className="sp-footer">
-              <button type="button" className="sp-pro-button">
-                <Crown size={17} />
+              <button
+                type="button"
+                className="sp-pro"
+                onClick={() => void openDashboard()}
+              >
+                <Crown size={16} />
                 <span>Pro</span>
               </button>
             </footer>
@@ -378,313 +626,112 @@ export function FloatingStudyPilot() {
   );
 }
 
-function StudyStage({
-  view,
-  savedFolder,
-  isLivePaused,
-}: {
-  view: StudyPilotView;
-  savedFolder: StudyFolder;
-  isLivePaused: boolean;
-}) {
-  const title = stageTitle(view, savedFolder, isLivePaused);
-  const subtitle = stageSubtitle(view);
+const sectionReveal = {
+  hidden: { opacity: 0, y: 14 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const },
+  },
+};
 
+function Orb({ state }: { state: OrbState }) {
   return (
-    <section className="sp-stage" aria-live="polite">
-      <span className="sp-live-dot" aria-hidden="true" />
-
-      <div className="sp-energy-field">
-        <div className="sp-energy-ring" data-active={view}>
-          <span className="sp-ring-a" />
-          <span className="sp-ring-b" />
-          <span className="sp-ring-c" />
-          <span className="sp-wave-mark" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-        </div>
-      </div>
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={`${view}-${isLivePaused}`}
-          className="sp-stage-copy"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.16 }}
-        >
-          <h2>{title}</h2>
-          <p>{subtitle}</p>
-        </motion.div>
-      </AnimatePresence>
-    </section>
-  );
-}
-
-function VoiceControls({
-  view,
-  isMicOn,
-  isLivePaused,
-  onMicToggle,
-  onListen,
-  onPause,
-  onSettings,
-}: {
-  view: StudyPilotView;
-  isMicOn: boolean;
-  isLivePaused: boolean;
-  onMicToggle: () => void;
-  onListen: () => void;
-  onPause: () => void;
-  onSettings: () => void;
-}) {
-  return (
-    <div className="sp-voice-controls" aria-label="Live study controls">
-      <RoundButton
-        active={isMicOn}
-        label={isMicOn ? 'Mute microphone' : 'Use microphone'}
-        icon={<Mic size={27} />}
-        onClick={onMicToggle}
-      />
-      <RoundButton
-        label="Share screen for live help"
-        icon={<Volume2 size={27} />}
-        onClick={onListen}
-        active={view === 'live'}
-      />
-      <RoundButton
-        label={isLivePaused ? 'Resume sharing' : 'Pause sharing'}
-        icon={isLivePaused ? <Play size={27} /> : <Pause size={27} />}
-        onClick={onPause}
-        active={view === 'live' && !isLivePaused}
-      />
-      <RoundButton
-        label="Capture screenshot"
-        icon={<Settings size={27} />}
-        onClick={onSettings}
-      />
+    <div className="sp-orb" data-state={state} aria-hidden="true">
+      <span className="sp-orb-ripples" />
+      <span className="sp-orb-bloom sp-orb-bloom--violet" />
+      <span className="sp-orb-bloom sp-orb-bloom--blue" />
+      <span className="sp-orb-halo" />
+      <span className="sp-orb-ring" />
+      <span className="sp-orb-nebula" />
+      <span className="sp-orb-core" />
+      <span className="sp-orb-wave">
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </span>
     </div>
   );
 }
 
 function RoundButton({
-  active = false,
+  active,
+  tinted = false,
   label,
-  icon,
   onClick,
+  children,
 }: {
-  active?: boolean;
+  active: boolean;
+  tinted?: boolean;
   label: string;
-  icon: ReactNode;
   onClick: () => void;
+  children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className="sp-round-button"
+      className="sp-round"
       data-active={active}
+      data-tinted={tinted}
       aria-label={label}
       title={label}
       onClick={onClick}
     >
-      {icon}
+      {children}
     </button>
   );
 }
 
-function Composer({
-  question,
-  onQuestionChange,
-  onSubmit,
-}: {
-  question: string;
-  onQuestionChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <div className="sp-composer">
-      <textarea
-        value={question}
-        rows={1}
-        placeholder="Ask a question or say something..."
-        onChange={event => onQuestionChange(event.target.value)}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            onSubmit();
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="sp-send-button"
-        aria-label="Send question"
-        onClick={onSubmit}
-        disabled={!question.trim()}
-      >
-        <Send size={26} fill="currentColor" />
-      </button>
-    </div>
-  );
-}
-
-function QuickActions({
-  isSaving,
-  saveEnabled,
-  view,
-  onSummarize,
-  onExplain,
-  onQuiz,
-  onFlashcards,
-  onSave,
-  onRetake,
-  onStop,
-}: {
-  isSaving: boolean;
-  saveEnabled: boolean;
-  view: StudyPilotView;
-  onSummarize: () => void;
-  onExplain: () => void;
-  onQuiz: () => void;
-  onFlashcards: () => void;
-  onSave: () => void;
-  onRetake: () => void;
-  onStop: () => void;
-}) {
-  if (view === 'live') {
-    return (
-      <div className="sp-chip-row">
-        <ActionChip icon={<Square size={18} />} label="Stop sharing" onClick={onStop} danger />
-        <ActionChip icon={<Camera size={18} />} label="Send snapshot" onClick={onRetake} />
-        <ActionChip icon={<ExternalLink size={18} />} label="Save" onClick={onSave} disabled={!saveEnabled} />
-      </div>
-    );
-  }
-
-  if (view === 'screenshot') {
-    return (
-      <div className="sp-chip-row">
-        <ActionChip icon={<Lightbulb size={18} />} label="Explain" onClick={onExplain} />
-        <ActionChip icon={<BookOpen size={18} />} label="Summarize" onClick={onSummarize} />
-        <ActionChip icon={<RotateCcw size={18} />} label="Retake" onClick={onRetake} />
-        <ActionChip
-          icon={<ExternalLink size={18} />}
-          label={isSaving ? 'Saving' : 'Send'}
-          onClick={onSave}
-          disabled={!saveEnabled}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="sp-chip-row">
-      <ActionChip icon={<FileText size={18} />} label="Summarize" onClick={onSummarize} />
-      <ActionChip icon={<Lightbulb size={18} />} label="Explain" onClick={onExplain} />
-      <ActionChip icon={<HelpCircle size={18} />} label="Quiz Me" onClick={onQuiz} />
-      <ActionChip icon={<BookOpen size={18} />} label="Flashcards" onClick={onFlashcards} />
-    </div>
-  );
-}
-
-function ActionChip({
+function MenuItem({
   icon,
   label,
   onClick,
-  disabled = false,
-  danger = false,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      className="sp-action-chip"
-      data-danger={danger}
-      onClick={onClick}
-      disabled={disabled}
-    >
+    <button type="button" className="sp-menu-item" role="menuitem" onClick={onClick}>
       {icon}
       <span>{label}</span>
     </button>
   );
 }
 
-function AnswerPanel({
-  view,
-  answer,
-  savedFolder,
-  isSaving,
-  onSave,
-  onOpenDashboard,
+function QuickChip({
+  label,
+  onClick,
+  children,
 }: {
-  view: StudyPilotView;
-  answer: string;
-  savedFolder: StudyFolder;
-  isSaving: boolean;
-  onSave: () => void;
-  onOpenDashboard: () => void;
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
 }) {
-  const isSaved = view === 'saved';
-
   return (
-    <section className="sp-answer-card">
-      <div className="sp-answer-head">
-        <div>
-          <strong>
-            {isSaved ? `Saved to ${savedFolder}` : 'Photosynthesis explained'}
-          </strong>
-          <span>{isSaved ? 'Ready in dashboard' : 'Just now'}</span>
-        </div>
-        <ChevronDown size={22} />
-      </div>
-
-      <p>{answer}</p>
-
-      <div className="sp-answer-actions">
-        <button type="button" aria-label="Read answer aloud">
-          <Volume2 size={20} />
-        </button>
-        <button type="button" aria-label="Copy answer">
-          <Copy size={20} />
-        </button>
-        <span />
-        <button
-          type="button"
-          className="sp-save-inline"
-          onClick={isSaved ? onOpenDashboard : onSave}
-        >
-          {isSaved ? <ExternalLink size={20} /> : <CheckCircle2 size={20} />}
-          <span>{isSaved ? 'Open' : isSaving ? 'Saving' : 'Save'}</span>
-        </button>
-        <button type="button" aria-label="Helpful">
-          <ThumbsUp size={20} />
-        </button>
-        <button type="button" aria-label="Not helpful">
-          <ThumbsDown size={20} />
-        </button>
-      </div>
-    </section>
+    <button type="button" className="sp-chip" onClick={onClick}>
+      {children}
+      <span>{label}</span>
+    </button>
   );
 }
 
-function ContextRail({
+function SettingsSheet({
   page,
   context,
   onChange,
+  onOpenDashboard,
 }: {
   page: PageContext;
   context: ContextShareSettings;
   onChange: Dispatch<SetStateAction<ContextShareSettings>>;
+  onOpenDashboard: () => void;
 }) {
   const setFlag =
     (
@@ -698,132 +745,202 @@ function ContextRail({
     };
 
   return (
-    <section className="sp-context-rail">
-      <div className="sp-context-title">
-        <ShieldCheck size={15} />
+    <section className="sp-settings">
+      <div className="sp-settings-title">
+        <ShieldCheck size={14} />
         <span>Shared when you ask or save</span>
       </div>
-      <div className="sp-context-options">
+
+      <div className="sp-settings-toggles">
         <TogglePill
-          icon={<Camera size={14} />}
           label="Screenshot"
           checked={context.screenshot}
           onChange={setFlag('screenshot')}
         />
         <TogglePill
-          icon={<ExternalLink size={14} />}
           label="Page URL"
           checked={context.pageUrl}
           onChange={setFlag('pageUrl')}
         />
         <TogglePill
-          icon={<Type size={14} />}
           label={page.selectedText ? 'Selected text' : 'No selection'}
           checked={context.selectedText}
           onChange={setFlag('selectedText')}
         />
         <TogglePill
-          icon={<CheckCircle2 size={14} />}
-          label="Save"
+          label="Auto-save"
           checked={context.saveToDashboard}
           onChange={setFlag('saveToDashboard')}
         />
       </div>
 
-      <label className="sp-folder-select">
-        <span>Folder</span>
-        <select
-          value={context.folder}
-          onChange={event =>
-            onChange(prev => ({
-              ...prev,
-              folder: event.target.value as StudyFolder,
-            }))
-          }
-        >
-          {STUDY_FOLDERS.map(folder => (
-            <option key={folder} value={folder}>
-              {folder}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="sp-settings-row">
+        <label className="sp-folder">
+          <span>Folder</span>
+          <select
+            value={context.folder}
+            onChange={event =>
+              onChange(prev => ({
+                ...prev,
+                folder: event.target.value as StudyFolder,
+              }))
+            }
+          >
+            {STUDY_FOLDERS.map(folder => (
+              <option key={folder} value={folder}>
+                {folder}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="sp-dashboard-link" onClick={onOpenDashboard}>
+          <ExternalLink size={14} />
+          <span>Dashboard</span>
+        </button>
+      </div>
     </section>
   );
 }
 
 function TogglePill({
-  icon,
   label,
   checked,
   onChange,
 }: {
-  icon: ReactNode;
   label: string;
   checked: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <label className="sp-toggle-pill" data-checked={checked}>
+    <label className="sp-toggle" data-checked={checked}>
       <input type="checkbox" checked={checked} onChange={onChange} />
-      {icon}
       <span>{label}</span>
     </label>
   );
 }
 
-function stageTitle(
-  view: StudyPilotView,
-  savedFolder: StudyFolder,
-  isLivePaused: boolean,
-): string {
-  switch (view) {
-    case 'screenshot':
-      return 'Screenshot ready';
-    case 'live':
-      return isLivePaused ? 'Paused' : 'Listening...';
-    case 'thinking':
-      return 'Reading your screen...';
-    case 'answer':
-      return 'Answer ready';
-    case 'saved':
-      return `Saved to ${savedFolder}`;
-    case 'idle':
-    default:
-      return 'Listening...';
-  }
+function SparkleLogo({ size = 28 }: { size?: number }) {
+  const gradientId = useId().replace(/[^a-zA-Z0-9]/g, '');
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 44 44"
+      fill="none"
+      aria-hidden="true"
+      className="sp-logo"
+    >
+      <defs>
+        <linearGradient
+          id={`sp-spark-${gradientId}`}
+          x1="8"
+          y1="4"
+          x2="38"
+          y2="40"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#8fdcff" />
+          <stop offset="0.52" stopColor="#38a1ff" />
+          <stop offset="1" stopColor="#2e5bff" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M26.5 2.5c.78 10.5 5.22 14.94 15.72 15.72-10.5.78-14.94 5.22-15.72 15.72-.78-10.5-5.22-14.94-15.72-15.72C21.28 17.44 25.72 13 26.5 2.5Z"
+        fill={`url(#sp-spark-${gradientId})`}
+      />
+      <path
+        d="M11.5 28c.42 5.55 2.78 7.91 8.33 8.33-5.55.42-7.91 2.78-8.33 8.33-.42-5.55-2.78-7.91-8.33-8.33 5.55-.42 7.91-2.78 8.33-8.33Z"
+        fill={`url(#sp-spark-${gradientId})`}
+      />
+    </svg>
+  );
 }
 
-function stageSubtitle(view: StudyPilotView): string {
-  switch (view) {
-    case 'screenshot':
-      return 'Ask StudyPilot to explain, summarize, or save this snapshot.';
-    case 'live':
-      return 'StudyPilot can see your shared screen. Stop sharing anytime.';
-    case 'thinking':
-      return 'Checking the visible page before answering.';
-    case 'answer':
-      return 'Review the explanation, then save it to your dashboard.';
-    case 'saved':
-      return 'Your study session is ready for review.';
-    case 'idle':
-    default:
-      return 'Ask anything about this page';
-  }
+function SummarizeGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect width="18" height="18" rx="4.5" fill="#3d7dfd" />
+      <path
+        d="M5.4 5.6h7.2M5.4 8.6h7.2M5.4 11.6h4.6"
+        stroke="#eaf2ff"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
-function answerForAction(action: StudyAction, question: string): string {
+function ExplainGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path
+        d="M9 1.8a5.1 5.1 0 0 0-2.9 9.3c.6.44.9 1.02.9 1.65v.35h4v-.35c0-.63.3-1.21.9-1.65A5.1 5.1 0 0 0 9 1.8Z"
+        stroke="#fbbf24"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M7.2 15.4h3.6" stroke="#fbbf24" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function QuizGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="9" fill="#1fbc84" />
+      <path
+        d="M6.9 6.9c.2-1.25 1.16-2 2.3-2 1.26 0 2.2.86 2.2 2 0 1.55-1.85 1.7-2.15 3"
+        stroke="#f2fff9"
+        strokeWidth="1.55"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <circle cx="9.2" cy="12.9" r="0.95" fill="#f2fff9" />
+    </svg>
+  );
+}
+
+function FlashcardsGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect width="18" height="18" rx="4.5" fill="#8b5cf6" />
+      <rect x="6.8" y="4.4" width="6.8" height="8.8" rx="1.4" fill="#efe9ff" opacity="0.55" />
+      <rect x="4.4" y="6" width="6.8" height="8.8" rx="1.4" fill="#f6f2ff" />
+    </svg>
+  );
+}
+
+function cardForAction(action: StudyAction, customQuestion?: string): AnswerCard {
+  const question = customQuestion?.trim();
+
   switch (action) {
     case 'summarize':
-      return 'Quick summary: this page is introducing the main idea, then using the visible example to make it concrete. Save the definition, the example, and one question you still have.';
+      return {
+        title: 'Page summary',
+        body: 'Quick summary: this page introduces the main idea, then uses the visible example to make it concrete. Keep the definition, the example, and one question you still have.',
+      };
     case 'quiz':
-      return 'Quiz time: what is the main concept on screen, which detail supports it, and what would change if one condition in the example changed?';
+      return {
+        title: 'Quick quiz',
+        body: 'Quiz time: what is the main concept on screen, which detail supports it, and what would change if one condition in the example changed?',
+      };
     case 'flashcards':
-      return 'Flashcards drafted: Front: What is the main idea here? Back: Explain the concept in your own words. Front: Why does the example matter? Back: It shows how the idea works in a real case.';
-    case 'step-by-step':
-      return 'Step by step: identify the title, underline the main claim, connect each visual to that claim, then write one sentence explaining why it matters.';
+      return {
+        title: 'Flashcards drafted',
+        body: 'Front: What is the main idea here? Back: Explain the concept in your own words. Front: Why does the example matter? Back: It shows how the idea works in a real case.',
+      };
     case 'explain':
     default:
-      return `${question}: ${MOCK_ANSWER}`;
+      if (question) {
+        return { title: titleFromQuestion(question), body: MOCK_ANSWER };
+      }
+      return { title: 'Photosynthesis explained', body: MOCK_ANSWER };
   }
+}
+
+function titleFromQuestion(question: string): string {
+  const clean = question.replace(/[?!.]+$/, '').trim();
+  const short = clean.length > 44 ? `${clean.slice(0, 44).trimEnd()}…` : clean;
+  return short.charAt(0).toUpperCase() + short.slice(1);
 }

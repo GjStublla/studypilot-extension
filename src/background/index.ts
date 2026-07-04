@@ -8,8 +8,32 @@ import {
 import type { CaptureVisibleTabResult, PageContext } from '@/shared/types';
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.info('[StudyPilot] MVP installed. Floating UI is injected on http/https pages.');
+  console.info('[StudyPilot] Installed. Click the toolbar icon to toggle the panel on any http/https page.');
 });
+
+// The toolbar icon is the single entry point: it toggles the on-page panel.
+chrome.action.onClicked.addListener(tab => {
+  if (tab.id === undefined) return;
+  const tabId = tab.id;
+
+  chrome.tabs
+    .sendMessage(tabId, { type: 'STUDYPILOT_TOGGLE_MODAL' })
+    .catch(() => flashRefreshHint(tabId));
+});
+
+async function flashRefreshHint(tabId: number): Promise<void> {
+  // Content script is not on this page (chrome:// page, web store, or a tab
+  // opened before the extension was installed). Hint that a refresh is needed.
+  try {
+    await chrome.action.setBadgeBackgroundColor({ color: '#5b4df0' });
+    await chrome.action.setBadgeText({ tabId, text: '↻' });
+    setTimeout(() => {
+      chrome.action.setBadgeText({ tabId, text: '' }).catch(() => undefined);
+    }, 2600);
+  } catch {
+    // Tab may have closed; nothing to do.
+  }
+}
 
 chrome.runtime.onMessage.addListener(
   (
@@ -62,6 +86,7 @@ chrome.runtime.onMessage.addListener(
         return true;
 
       case 'STUDYPILOT_OPEN_MODAL':
+      case 'STUDYPILOT_TOGGLE_MODAL':
         return false;
 
       default:

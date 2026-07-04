@@ -1,9 +1,9 @@
 {
   "name": "studypilot-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "StudyPilot Chrome extension MVP with a mocked study companion UI and dashboard handoff.",
+  "description": "Study Pilot Chrome extension MVP: a single voice-first study companion panel injected on the page.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

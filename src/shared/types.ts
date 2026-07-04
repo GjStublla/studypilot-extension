@@ -7,27 +7,9 @@ export const STUDY_FOLDERS = [
 
 export type StudyFolder = (typeof STUDY_FOLDERS)[number];
 
-export type StudyPilotStatus =
-  | 'ready'
-  | 'screenshot-ready'
-  | 'live-sharing'
-  | 'explaining'
-  | 'saved';
+export type StudyPhase = 'idle' | 'thinking' | 'answer' | 'saved';
 
-export type StudyPilotView =
-  | 'idle'
-  | 'screenshot'
-  | 'live'
-  | 'thinking'
-  | 'answer'
-  | 'saved';
-
-export type StudyAction =
-  | 'explain'
-  | 'summarize'
-  | 'quiz'
-  | 'flashcards'
-  | 'step-by-step';
+export type StudyAction = 'explain' | 'summarize' | 'quiz' | 'flashcards';
 
 export interface PageContext {
   sourceUrl: string;

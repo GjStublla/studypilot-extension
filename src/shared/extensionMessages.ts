@@ -10,7 +10,8 @@ export type StudyPilotRuntimeMessage =
   | { type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB' }
   | { type: 'STUDYPILOT_SAVE_SESSION'; payload: { session: StudySession } }
   | { type: 'STUDYPILOT_OPEN_DASHBOARD'; payload?: { url?: string } }
-  | { type: 'STUDYPILOT_OPEN_MODAL' };
+  | { type: 'STUDYPILOT_OPEN_MODAL' }
+  | { type: 'STUDYPILOT_TOGGLE_MODAL' };
 
 export type StudyPilotResponse<T> =
   | { ok: true; data: T }
