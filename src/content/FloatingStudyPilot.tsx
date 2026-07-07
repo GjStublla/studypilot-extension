@@ -36,6 +36,7 @@ import {
   STUDY_FOLDERS,
   type ContextShareSettings,
   type DashboardSaveResult,
+  type GenerateStudyAnswerResult,
   type PageContext,
   type StudyAction,
   type StudyFolder,
@@ -194,26 +195,45 @@ export function FloatingStudyPilot({
     noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
   }
 
-  function runStudyAction(action: StudyAction, customQuestion?: string) {
+  async function runStudyAction(action: StudyAction, customQuestion?: string) {
     if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
 
     setPhase('thinking');
     setFeedback(null);
     setCopied(false);
 
-    thinkingTimer.current = window.setTimeout(() => {
-      setCard(cardForAction(action, customQuestion));
+    try {
+      const response = await sendRuntimeMessage<GenerateStudyAnswerResult>({
+        type: 'STUDYPILOT_GENERATE_ANSWER',
+        payload: {
+          action,
+          question: customQuestion?.trim() || undefined,
+          pageTitle: page.sourceTitle,
+          pageUrl: context.pageUrl ? page.sourceUrl : undefined,
+          selectedText: context.selectedText ? page.selectedText : undefined,
+        },
+      });
+
+      // Keep the standalone Vite preview useful when no extension runtime exists.
+      const answer = response ?? cardForAction(action, customQuestion);
+      setCard(answer);
       setCardOpen(true);
       setPhase('answer');
       flashNotice('Answer ready');
-    }, 950);
+    } catch (error) {
+      setPhase('idle');
+      flashNotice(
+        error instanceof Error ? error.message : 'Could not reach the AI service',
+        4200,
+      );
+    }
   }
 
   function handleSubmit() {
     const text = question.trim();
     if (!text) return;
     setQuestion('');
-    runStudyAction('explain', text);
+    void runStudyAction('explain', text);
   }
 
   async function saveToDashboard() {
@@ -522,16 +542,16 @@ export function FloatingStudyPilot({
               </motion.div>
 
               <motion.div className="sp-chips" variants={sectionReveal}>
-                <QuickChip label="Summarize" onClick={() => runStudyAction('summarize')}>
+                <QuickChip label="Summarize" onClick={() => void runStudyAction('summarize')}>
                   <SummarizeGlyph />
                 </QuickChip>
-                <QuickChip label="Explain" onClick={() => runStudyAction('explain')}>
+                <QuickChip label="Explain" onClick={() => void runStudyAction('explain')}>
                   <ExplainGlyph />
                 </QuickChip>
-                <QuickChip label="Quiz Me" onClick={() => runStudyAction('quiz')}>
+                <QuickChip label="Quiz Me" onClick={() => void runStudyAction('quiz')}>
                   <QuizGlyph />
                 </QuickChip>
-                <QuickChip label="Flashcards" onClick={() => runStudyAction('flashcards')}>
+                <QuickChip label="Flashcards" onClick={() => void runStudyAction('flashcards')}>
                   <FlashcardsGlyph />
                 </QuickChip>
               </motion.div>

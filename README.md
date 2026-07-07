@@ -2,6 +2,37 @@
 
 Study Pilot is a Chrome Manifest V3 extension MVP for a voice-first study companion. Everything lives in a single on-page panel: the glowing listening orb, voice controls, quick study actions, the latest explanation, and session settings. There is no separate popup UI.
 
+## AI Answer Endpoint
+
+The main question box and the Summarize, Explain, Quiz Me, and Flashcards
+actions call the server configured by `VITE_AI_API_URL` (default:
+`http://localhost:8000/ai/generate`).
+
+The extension sends:
+
+```json
+{
+  "action": "explain",
+  "question": "What does this mean?",
+  "pageTitle": "Example page",
+  "pageUrl": "https://example.com",
+  "selectedText": "Optional text selected by the user"
+}
+```
+
+The endpoint must return:
+
+```json
+{
+  "title": "Short answer title",
+  "body": "The generated study answer."
+}
+```
+
+Google service-account JSON and private keys must stay on that server. Never
+copy them into this repository or into a `VITE_` environment variable, because
+Vite embeds those values in the public extension bundle.
+
 ## Run Locally
 
 ```bash

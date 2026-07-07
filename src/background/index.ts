@@ -5,7 +5,15 @@ import {
   isStudyPilotRuntimeMessage,
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
-import type { CaptureVisibleTabResult, PageContext } from '@/shared/types';
+import type {
+  CaptureVisibleTabResult,
+  GenerateStudyAnswerRequest,
+  GenerateStudyAnswerResult,
+  PageContext,
+} from '@/shared/types';
+
+const AI_API_URL =
+  import.meta.env.VITE_AI_API_URL || 'http://localhost:8000/ai/generate';
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[StudyPilot] Installed. Click the toolbar icon to toggle the panel on any http/https page.');
@@ -62,6 +70,17 @@ chrome.runtime.onMessage.addListener(
           );
         return true;
 
+      case 'STUDYPILOT_GENERATE_ANSWER':
+        generateStudyAnswer(message.payload)
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
       case 'STUDYPILOT_SAVE_SESSION':
         saveStudySession(message.payload.session)
           .then(data => sendResponse({ ok: true, data }))
@@ -94,6 +113,48 @@ chrome.runtime.onMessage.addListener(
     }
   },
 );
+
+async function generateStudyAnswer(
+  request: GenerateStudyAnswerRequest,
+): Promise<GenerateStudyAnswerResult> {
+  const response = await fetch(AI_API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `AI request failed (${response.status}).`);
+  }
+
+  const data = (await response.json()) as Partial<GenerateStudyAnswerResult>;
+  if (typeof data.body !== 'string' || !data.body.trim()) {
+    throw new Error('The AI endpoint returned an invalid response.');
+  }
+
+  return {
+    title:
+      typeof data.title === 'string' && data.title.trim()
+        ? data.title.trim()
+        : 'StudyPilot answer',
+    body: data.body.trim(),
+  };
+}
+
+async function readErrorDetail(response: Response): Promise<string> {
+  try {
+    const data = (await response.json()) as {
+      detail?: unknown;
+      error?: unknown;
+    };
+    if (typeof data.detail === 'string') return data.detail;
+    if (typeof data.error === 'string') return data.error;
+  } catch {
+    // The endpoint may return an empty or non-JSON error response.
+  }
+  return '';
+}
 
 function getPageContextFromSender(sender: chrome.runtime.MessageSender): PageContext {
   const tab = sender.tab;

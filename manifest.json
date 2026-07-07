@@ -20,7 +20,12 @@
     }
   ],
   "permissions": ["activeTab"],
-  "host_permissions": [],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "https://*.supabase.co/*",
+    "https://studypilot.app/*",
+    "https://*.studypilot.ai/*"
+  ],
   "web_accessible_resources": [
     {
       "resources": ["fonts/*.woff2"],

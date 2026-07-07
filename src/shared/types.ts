@@ -11,6 +11,19 @@ export type StudyPhase = 'idle' | 'thinking' | 'answer' | 'saved';
 
 export type StudyAction = 'explain' | 'summarize' | 'quiz' | 'flashcards';
 
+export interface GenerateStudyAnswerRequest {
+  action: StudyAction;
+  question?: string;
+  pageTitle: string;
+  pageUrl?: string;
+  selectedText?: string;
+}
+
+export interface GenerateStudyAnswerResult {
+  title: string;
+  body: string;
+}
+
 export interface PageContext {
   sourceUrl: string;
   sourceTitle: string;
