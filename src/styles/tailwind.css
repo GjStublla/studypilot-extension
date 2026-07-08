@@ -724,6 +724,45 @@
   line-height: 1.55;
 }
 
+.sp-card-screenshot {
+  margin: 0 0 13px;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 205, 0.16);
+  background: rgba(6, 8, 16, 0.72);
+}
+
+.sp-card-screenshot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.sp-card-screenshot figcaption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 9px;
+  color: var(--sp-muted);
+  font-size: 12px;
+  font-weight: 600;
+  border-top: 1px solid rgba(148, 163, 205, 0.12);
+}
+
+.sp-card-screenshot figcaption svg {
+  flex: 0 0 auto;
+  color: var(--sp-cyan);
+}
+
+.sp-card-screenshot figcaption span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sp-card-actions {
   display: flex;
   align-items: center;

@@ -23,35 +23,50 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
-import {
-  DASHBOARD_URL,
-  createMockStudySession,
-  saveStudySession,
-} from '@/shared/mockDashboard';
+import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
   isStudyPilotRuntimeMessage,
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
+import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
 import {
   STUDY_FOLDERS,
+  type CoachingResponse,
   type ContextShareSettings,
   type DashboardSaveResult,
-  type GenerateStudyAnswerResult,
+  type ExtensionAuthSession,
+  type ExtensionAuthState,
+  type LiveTokenResult,
   type PageContext,
   type StudyAction,
   type StudyFolder,
   type StudyPhase,
+  type StudySession,
+  type StudyTranscriptTurn,
 } from '@/shared/types';
 
-const MOCK_ANSWER =
-  'Photosynthesis converts light energy into chemical energy. Plants use light, water, and carbon dioxide to produce glucose and oxygen. It occurs in two main stages: the light-dependent reactions (producing ATP and NADPH) and the Calvin cycle (fixing CO₂ into glucose).';
+const LOCAL_PREVIEW_TEXT =
+  'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
 
 interface AnswerCard {
   title: string;
   body: string;
 }
 
+interface SaveSessionOptions {
+  questionText?: string;
+  answerText?: string;
+  transcriptSnapshot?: StudyTranscriptTurn[];
+  screenshotDataUrl?: string;
+  successNotice?: string;
+}
+
 type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
+
+const ACCESS_KEY = 'sp_access_token';
+const USER_ID_KEY = 'sp_user_id';
+const EMAIL_KEY = 'sp_email';
+const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
 
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
@@ -70,6 +85,86 @@ function isExtensionRuntime(): boolean {
     Boolean(chrome.runtime?.id) &&
     typeof chrome.runtime.sendMessage === 'function'
   );
+}
+
+function isDashboardBridgeOrigin(): boolean {
+  try {
+    const dashboardHost = new URL(DASHBOARD_URL).hostname;
+    const currentHost = window.location.hostname;
+
+    return (
+      currentHost === dashboardHost ||
+      currentHost === 'localhost' ||
+      currentHost === '127.0.0.1'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readDashboardAuthSession(): ExtensionAuthSession | null {
+  if (!isDashboardBridgeOrigin()) return null;
+
+  try {
+    const accessToken = window.localStorage.getItem(ACCESS_KEY);
+    if (accessToken) {
+      return {
+        access_token: accessToken,
+        user_id: window.localStorage.getItem(USER_ID_KEY) ?? undefined,
+        email: window.localStorage.getItem(EMAIL_KEY),
+      };
+    }
+
+    return readSupabaseStoredAuthSession();
+  } catch {
+    return null;
+  }
+}
+
+function readSupabaseStoredAuthSession(): ExtensionAuthSession | null {
+  const candidateKeys = Object.keys(window.localStorage).filter(
+    key => key === SUPABASE_OAUTH_STORAGE_KEY || /^sb-.+-auth-token$/.test(key),
+  );
+
+  for (const key of candidateKeys) {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) continue;
+
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      const session = getStoredSupabaseSession(parsed);
+      if (session) return session;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
+  if (!isObject(value)) return null;
+
+  const sessionValue =
+    isObject(value.currentSession) ? value.currentSession :
+    isObject(value.session) ? value.session :
+    value;
+
+  if (!isObject(sessionValue) || typeof sessionValue.access_token !== 'string') {
+    return null;
+  }
+
+  const user = isObject(sessionValue.user) ? sessionValue.user : null;
+  return {
+    access_token: sessionValue.access_token,
+    user_id: typeof user?.id === 'string' ? user.id : undefined,
+    email: typeof user?.email === 'string' ? user.email : null,
+    expires_at: typeof sessionValue.expires_at === 'number' ? sessionValue.expires_at : undefined,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 async function sendRuntimeMessage<T>(
@@ -93,33 +188,38 @@ export function FloatingStudyPilot({
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [micOn, setMicOn] = useState(true);
+  const [micOn, setMicOn] = useState(false);
   const [paused, setPaused] = useState(false);
   const [phase, setPhase] = useState<StudyPhase>('idle');
   const [notice, setNotice] = useState<string | null>(null);
+  const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
 
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
+  const [lastQuestion, setLastQuestion] = useState('');
   const [card, setCard] = useState<AnswerCard>({
-    title: 'Photosynthesis explained',
-    body: MOCK_ANSWER,
+    title: 'Ready to coach',
+    body: 'Ask about the page, summarize the material, or save a coaching session once the extension is connected to your StudyPilot account.',
   });
   const [cardOpen, setCardOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [transcript, setTranscript] = useState<StudyTranscriptTurn[]>([]);
+  const [lastScreenshotDataUrl, setLastScreenshotDataUrl] = useState<string | null>(null);
+  const [cardScreenshotDataUrl, setCardScreenshotDataUrl] = useState<string | null>(null);
 
   const [context, setContext] = useState<ContextShareSettings>({
-    screenshot: true,
+    screenshot: false,
     pageUrl: true,
     selectedText: false,
     saveToDashboard: true,
     folder: 'Biology 101',
   });
 
-  const thinkingTimer = useRef<number | undefined>(undefined);
   const noticeTimer = useRef<number | undefined>(undefined);
+  const sessionStartedAt = useRef(Date.now());
 
   useEffect(() => {
     const refreshSelection = () => setPage(getPageContext());
@@ -148,6 +248,14 @@ export function FloatingStudyPilot({
   }, []);
 
   useEffect(() => {
+    void bridgeDashboardSession();
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) void refreshAuthState();
+  }, [isOpen]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       setMenuOpen(false);
@@ -160,7 +268,6 @@ export function FloatingStudyPilot({
 
   useEffect(() => {
     return () => {
-      if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
@@ -176,6 +283,8 @@ export function FloatingStudyPilot({
 
   const statusText = notice
     ? notice
+    : authState?.connected === false
+      ? 'Connect dashboard'
     : phase === 'thinking'
       ? 'Thinking...'
       : paused
@@ -195,37 +304,130 @@ export function FloatingStudyPilot({
     noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
   }
 
+  function elapsedSeconds() {
+    return Math.max(0, Math.round((Date.now() - sessionStartedAt.current) / 1000));
+  }
+
+  async function refreshAuthState() {
+    try {
+      const response = await sendRuntimeMessage<ExtensionAuthState>({
+        type: 'STUDYPILOT_GET_AUTH_STATUS',
+      });
+      if (response) setAuthState(response);
+    } catch (error) {
+      setAuthState({
+        connected: false,
+        error: error instanceof Error ? error.message : STUDYPILOT_CONNECT_MESSAGE,
+      });
+    }
+  }
+
+  async function bridgeDashboardSession() {
+    const dashboardSession = readDashboardAuthSession();
+    if (!dashboardSession) return;
+
+    try {
+      const response = await sendRuntimeMessage<ExtensionAuthState>({
+        type: 'STUDYPILOT_CONNECT_SESSION',
+        payload: dashboardSession,
+      });
+      if (response?.connected) {
+        setAuthState(response);
+        flashNotice('Extension connected', 2400);
+      }
+    } catch {
+      // The normal auth-status request below will expose the usable state.
+    }
+  }
+
   async function runStudyAction(action: StudyAction, customQuestion?: string) {
-    if (thinkingTimer.current) window.clearTimeout(thinkingTimer.current);
+    const prompt = customQuestion?.trim();
+    const studentText = prompt || defaultPromptForAction(action);
+    const priorTranscript = transcript;
+    const userTurn: StudyTranscriptTurn = {
+      role: 'user',
+      text: studentText,
+      atSeconds: elapsedSeconds(),
+    };
 
     setPhase('thinking');
     setFeedback(null);
     setCopied(false);
+    setLastQuestion(studentText);
+    setCardScreenshotDataUrl(null);
 
     try {
-      const response = await sendRuntimeMessage<GenerateStudyAnswerResult>({
-        type: 'STUDYPILOT_GENERATE_ANSWER',
+      const response = await sendRuntimeMessage<CoachingResponse>({
+        type: 'STUDYPILOT_REQUEST_COACHING',
         payload: {
           action,
-          question: customQuestion?.trim() || undefined,
-          pageTitle: page.sourceTitle,
-          pageUrl: context.pageUrl ? page.sourceUrl : undefined,
-          selectedText: context.selectedText ? page.selectedText : undefined,
+          question: prompt,
+          page,
+          context,
+          history: priorTranscript.slice(-12).map(turn => ({
+            role: turn.role,
+            text: turn.text,
+          })),
         },
       });
 
-      // Keep the standalone Vite preview useful when no extension runtime exists.
-      const answer = response ?? cardForAction(action, customQuestion);
-      setCard(answer);
+      if (!response) {
+        setCard({
+          title: 'Extension runtime required',
+          body: LOCAL_PREVIEW_TEXT,
+        });
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice('Preview mode');
+        return;
+      }
+
+      if (!response.text.trim()) {
+        throw new Error('StudyPilot AI returned an empty response.');
+      }
+
+      const responseText = response.text.trim();
+      const screenshotDataUrl = response.screenshotDataUrl ?? null;
+      const aiTurn: StudyTranscriptTurn = {
+        role: 'ai',
+        text: responseText,
+        atSeconds: Math.max(userTurn.atSeconds + 1, elapsedSeconds()),
+      };
+      const nextTranscript = [...priorTranscript, userTurn, aiTurn];
+
+      setTranscript(nextTranscript);
+      if (screenshotDataUrl) setLastScreenshotDataUrl(screenshotDataUrl);
+      setCardScreenshotDataUrl(screenshotDataUrl);
+      setCard({
+        title: response.title || titleForAction(action, prompt),
+        body: responseText,
+      });
       setCardOpen(true);
       setPhase('answer');
-      flashNotice('Answer ready');
+      flashNotice('Coach response ready');
+      await refreshAuthState();
+      if (context.saveToDashboard) {
+        void persistSessionToDashboard({
+          questionText: studentText,
+          answerText: responseText,
+          transcriptSnapshot: nextTranscript,
+          screenshotDataUrl: context.screenshot ? screenshotDataUrl ?? undefined : undefined,
+          successNotice: 'Saved to StudyPilot',
+        });
+      }
     } catch (error) {
-      setPhase('idle');
-      flashNotice(
-        error instanceof Error ? error.message : 'Could not reach the AI service',
-        4200,
-      );
+      const message = error instanceof Error ? error.message : 'StudyPilot AI could not respond.';
+      setCard({
+        title: message.includes('connected') || message.includes('signed') || message.includes('session')
+          ? 'Connect StudyPilot'
+          : 'Coach unavailable',
+        body: message.includes('StudyPilot is not connected')
+          ? STUDYPILOT_CONNECT_MESSAGE
+          : message,
+      });
+      setCardOpen(true);
+      setPhase('answer');
+      flashNotice('Could not reach StudyPilot AI', 3000);
     }
   }
 
@@ -237,15 +439,27 @@ export function FloatingStudyPilot({
   }
 
   async function saveToDashboard() {
+    await persistSessionToDashboard();
+  }
+
+  async function persistSessionToDashboard(options: SaveSessionOptions = {}) {
     if (isSaving) return;
 
     setIsSaving(true);
-    const session = createMockStudySession({
+    const questionText = options.questionText ?? (lastQuestion || card.title);
+    const answerText = options.answerText ?? card.body;
+    const transcriptSnapshot = options.transcriptSnapshot ?? (transcript.length > 0
+      ? transcript
+      : fallbackTranscript(questionText, answerText));
+    const session = createStudySession({
       page,
       folder: context.folder,
-      question: card.title,
-      answer: card.body,
-      screenshotUrl: context.screenshot ? 'mock://studypilot/screenshot' : undefined,
+      question: questionText,
+      answer: answerText,
+      transcript: transcriptSnapshot,
+      screenshotDataUrl:
+        options.screenshotDataUrl ??
+        (context.screenshot ? lastScreenshotDataUrl ?? undefined : undefined),
       tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
     });
 
@@ -255,11 +469,25 @@ export function FloatingStudyPilot({
         payload: { session },
       });
 
-      if (!response) await saveStudySession(session);
+      if (!response) {
+        setCard({
+          title: 'Extension runtime required',
+          body: 'Open the built Chrome extension to save sessions to StudyPilot.',
+        });
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice('Preview mode cannot save', 2600);
+        return;
+      }
+
       setPhase('saved');
-      flashNotice(`Saved to ${session.folder}`, 2600);
-    } catch {
-      flashNotice('Could not save right now');
+      flashNotice(
+        response?.warning ? 'Saved; summary pending' : (options.successNotice ?? `Saved to ${session.folder}`),
+        2600,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save right now';
+      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not save right now');
     } finally {
       setIsSaving(false);
     }
@@ -276,11 +504,23 @@ export function FloatingStudyPilot({
     }
   }
 
-  function captureSnapshot() {
-    // TODO: Replace the simulated snapshot with chrome.tabs.captureVisibleTab
-    // through the background worker once the real capture flow is designed.
-    setContext(prev => ({ ...prev, screenshot: true }));
-    flashNotice('Snapshot added to context');
+  async function captureSnapshot() {
+    try {
+      const snapshot = await sendRuntimeMessage<{
+        dataUrl: string;
+        mimeType: string;
+      }>({
+        type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
+      });
+      if (snapshot?.dataUrl) {
+        setLastScreenshotDataUrl(snapshot.dataUrl);
+        setCardScreenshotDataUrl(snapshot.dataUrl);
+        setContext(prev => ({ ...prev, screenshot: true }));
+        flashNotice('Screenshot ready for coaching', 2600);
+      }
+    } catch {
+      flashNotice('Could not capture screenshot', 3000);
+    }
   }
 
   function speakAnswer() {
@@ -321,9 +561,37 @@ export function FloatingStudyPilot({
   function toggleMic() {
     setMicOn(value => {
       const next = !value;
-      if (next) setPaused(false);
+      if (next) {
+        setPaused(false);
+        void requestLiveAccess();
+      }
       return next;
     });
+  }
+
+  async function requestLiveAccess() {
+    try {
+      const response = await sendRuntimeMessage<LiveTokenResult>({
+        type: 'STUDYPILOT_GET_LIVE_TOKEN',
+      });
+
+      if (!response) {
+        setMicOn(false);
+        flashNotice('Open the extension build for live coach');
+        return;
+      }
+
+      if (response.status === 'stub' || response.status === 'fallback') {
+        setMicOn(false);
+      }
+
+      flashNotice(response.message, 3600);
+      await refreshAuthState();
+    } catch (error) {
+      setMicOn(false);
+      const message = error instanceof Error ? error.message : 'Live coach unavailable';
+      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+    }
   }
 
   return (
@@ -410,10 +678,10 @@ export function FloatingStudyPilot({
                     >
                       <MenuItem
                         icon={<Camera size={16} />}
-                        label="Capture snapshot"
+                        label="Check image capture"
                         onClick={() => {
                           setMenuOpen(false);
-                          captureSnapshot();
+                          void captureSnapshot();
                         }}
                       />
                       <MenuItem
@@ -587,6 +855,18 @@ export function FloatingStudyPilot({
                       transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                     >
                       <p className="sp-card-body">{card.body}</p>
+                      {cardScreenshotDataUrl ? (
+                        <figure className="sp-card-screenshot">
+                          <img
+                            src={cardScreenshotDataUrl}
+                            alt="Screenshot shared with StudyPilot"
+                          />
+                          <figcaption>
+                            <Camera size={13} />
+                            <span>Screenshot shared</span>
+                          </figcaption>
+                        </figure>
+                      ) : null}
                       <div className="sp-card-actions">
                         <button
                           type="button"
@@ -773,7 +1053,7 @@ function SettingsSheet({
 
       <div className="sp-settings-toggles">
         <TogglePill
-          label="Screenshot"
+          label={context.screenshot ? 'Screenshot on' : 'No screenshot'}
           checked={context.screenshot}
           onChange={setFlag('screenshot')}
         />
@@ -931,36 +1211,46 @@ function FlashcardsGlyph() {
   );
 }
 
-function cardForAction(action: StudyAction, customQuestion?: string): AnswerCard {
-  const question = customQuestion?.trim();
-
-  switch (action) {
-    case 'summarize':
-      return {
-        title: 'Page summary',
-        body: 'Quick summary: this page introduces the main idea, then uses the visible example to make it concrete. Keep the definition, the example, and one question you still have.',
-      };
-    case 'quiz':
-      return {
-        title: 'Quick quiz',
-        body: 'Quiz time: what is the main concept on screen, which detail supports it, and what would change if one condition in the example changed?',
-      };
-    case 'flashcards':
-      return {
-        title: 'Flashcards drafted',
-        body: 'Front: What is the main idea here? Back: Explain the concept in your own words. Front: Why does the example matter? Back: It shows how the idea works in a real case.',
-      };
-    case 'explain':
-    default:
-      if (question) {
-        return { title: titleFromQuestion(question), body: MOCK_ANSWER };
-      }
-      return { title: 'Photosynthesis explained', body: MOCK_ANSWER };
-  }
+interface StudySessionInput {
+  page: PageContext;
+  folder: StudyFolder;
+  question: string;
+  answer: string;
+  transcript?: StudyTranscriptTurn[];
+  screenshotDataUrl?: string;
+  screenshotUrl?: string;
+  tags?: string[];
 }
 
-function titleFromQuestion(question: string): string {
-  const clean = question.replace(/[?!.]+$/, '').trim();
-  const short = clean.length > 44 ? `${clean.slice(0, 44).trimEnd()}…` : clean;
-  return short.charAt(0).toUpperCase() + short.slice(1);
+function createStudySession(input: StudySessionInput): StudySession {
+  const durationSeconds =
+    input.transcript && input.transcript.length > 0
+      ? Math.max(...input.transcript.map(turn => turn.atSeconds))
+      : 0;
+
+  return {
+    id: crypto.randomUUID?.() ?? `study_${Date.now().toString(36)}`,
+    title: input.page.sourceTitle || 'StudyPilot session',
+    sourceUrl: input.page.sourceUrl,
+    sourceTitle: input.page.sourceTitle || input.page.host,
+    screenshotUrl: input.screenshotUrl,
+    screenshotDataUrl: input.screenshotDataUrl,
+    question: input.question,
+    answer: input.answer,
+    transcript: input.transcript,
+    folder: input.folder,
+    mode: 'Study Coach',
+    durationSeconds,
+    createdAt: new Date().toISOString(),
+    tags: input.tags ?? ['screen-help', 'saved-explanation'],
+  };
+}
+
+function fallbackTranscript(question: string, answer: string): StudyTranscriptTurn[] {
+  const turns: StudyTranscriptTurn[] = [
+    { role: 'user', text: question, atSeconds: 0 },
+    { role: 'ai', text: answer, atSeconds: 1 },
+  ];
+
+  return turns.filter(turn => turn.text.trim().length > 0);
 }

@@ -1,19 +1,26 @@
 /// <reference types="chrome" />
 
-import { DASHBOARD_URL, saveStudySession } from '@/shared/mockDashboard';
+import { DASHBOARD_URL } from '@/shared/config';
 import {
   isStudyPilotRuntimeMessage,
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
+import {
+  clearExtensionSession,
+  getAuthStatus,
+  importStudySessionToSupabase,
+  requestCoaching,
+  requestLiveToken,
+  storeExtensionSession,
+} from '@/shared/studypilotSupabase';
 import type {
   CaptureVisibleTabResult,
-  GenerateStudyAnswerRequest,
-  GenerateStudyAnswerResult,
+  CoachingRequest,
   PageContext,
 } from '@/shared/types';
 
-const AI_API_URL =
-  import.meta.env.VITE_AI_API_URL || 'http://localhost:8000/ai/generate';
+const CAPTURE_MAX_EDGE = 1024;
+const CAPTURE_JPEG_QUALITY = 0.72;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[StudyPilot] Installed. Click the toolbar icon to toggle the panel on any http/https page.');
@@ -59,6 +66,39 @@ chrome.runtime.onMessage.addListener(
         });
         return false;
 
+      case 'STUDYPILOT_GET_AUTH_STATUS':
+        getAuthStatus()
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_CONNECT_SESSION':
+        storeExtensionSession(message.payload)
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_DISCONNECT_SESSION':
+        clearExtensionSession()
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
       case 'STUDYPILOT_CAPTURE_VISIBLE_TAB':
         captureVisibleTab(sender)
           .then(data => sendResponse({ ok: true, data }))
@@ -70,8 +110,23 @@ chrome.runtime.onMessage.addListener(
           );
         return true;
 
-      case 'STUDYPILOT_GENERATE_ANSWER':
-        generateStudyAnswer(message.payload)
+      case 'STUDYPILOT_REQUEST_COACHING':
+        prepareCoachingRequest(message.payload, sender)
+          .then(async request => ({
+            ...await requestCoaching(request),
+            screenshotDataUrl: request.screenshotDataUrl,
+          }))
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_GET_LIVE_TOKEN':
+        requestLiveToken(message.payload?.sessionId)
           .then(data => sendResponse({ ok: true, data }))
           .catch(error =>
             sendResponse({
@@ -82,7 +137,7 @@ chrome.runtime.onMessage.addListener(
         return true;
 
       case 'STUDYPILOT_SAVE_SESSION':
-        saveStudySession(message.payload.session)
+        importStudySessionToSupabase(message.payload.session)
           .then(data => sendResponse({ ok: true, data }))
           .catch(error =>
             sendResponse({
@@ -114,48 +169,6 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-async function generateStudyAnswer(
-  request: GenerateStudyAnswerRequest,
-): Promise<GenerateStudyAnswerResult> {
-  const response = await fetch(AI_API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
-  });
-
-  if (!response.ok) {
-    const detail = await readErrorDetail(response);
-    throw new Error(detail || `AI request failed (${response.status}).`);
-  }
-
-  const data = (await response.json()) as Partial<GenerateStudyAnswerResult>;
-  if (typeof data.body !== 'string' || !data.body.trim()) {
-    throw new Error('The AI endpoint returned an invalid response.');
-  }
-
-  return {
-    title:
-      typeof data.title === 'string' && data.title.trim()
-        ? data.title.trim()
-        : 'StudyPilot answer',
-    body: data.body.trim(),
-  };
-}
-
-async function readErrorDetail(response: Response): Promise<string> {
-  try {
-    const data = (await response.json()) as {
-      detail?: unknown;
-      error?: unknown;
-    };
-    if (typeof data.detail === 'string') return data.detail;
-    if (typeof data.error === 'string') return data.error;
-  } catch {
-    // The endpoint may return an empty or non-JSON error response.
-  }
-  return '';
-}
-
 function getPageContextFromSender(sender: chrome.runtime.MessageSender): PageContext {
   const tab = sender.tab;
   const sourceUrl = tab?.url ?? '';
@@ -175,17 +188,100 @@ async function captureVisibleTab(
     throw new Error('Open StudyPilot on a page before capturing a screenshot.');
   }
 
-  // TODO: Wire this into the UI when moving beyond the simulated screenshot.
-  // chrome.tabs.captureVisibleTab requires user activation and activeTab access.
-  const dataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
+  const pngDataUrl = await chrome.tabs.captureVisibleTab(sender.tab.windowId, {
     format: 'png',
   });
+  const dataUrl = await compressCaptureDataUrl(pngDataUrl);
+  const mimeType = dataUrlMimeType(dataUrl);
 
   return {
     dataUrl,
+    mimeType,
     pageTitle: sender.tab.title ?? '',
     pageUrl: sender.tab.url ?? '',
   };
+}
+
+async function prepareCoachingRequest(
+  request: CoachingRequest,
+  sender: chrome.runtime.MessageSender,
+): Promise<CoachingRequest> {
+  if (!request.context.screenshot) return request;
+
+  const capture = await captureVisibleTab(sender);
+  const image = dataUrlToImage(capture.dataUrl, capture.mimeType);
+
+  return {
+    ...request,
+    page: {
+      ...request.page,
+      sourceTitle: capture.pageTitle || request.page.sourceTitle,
+      sourceUrl: capture.pageUrl || request.page.sourceUrl,
+    },
+    images: [...(request.images ?? []), image],
+    screenshotDataUrl: capture.dataUrl,
+  };
+}
+
+async function compressCaptureDataUrl(dataUrl: string): Promise<string> {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas === 'undefined') {
+    throw new Error('Screenshot compression is unavailable in this browser context.');
+  }
+
+  const sourceBlob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(sourceBlob);
+  const scale = Math.min(1, CAPTURE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = new OffscreenCanvas(width, height);
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    bitmap.close();
+    throw new Error('Screenshot compression could not create a drawing context.');
+  }
+
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  const jpeg = await canvas.convertToBlob({
+    type: 'image/jpeg',
+    quality: CAPTURE_JPEG_QUALITY,
+  });
+
+  return `data:image/jpeg;base64,${arrayBufferToBase64(await jpeg.arrayBuffer())}`;
+}
+
+function dataUrlToImage(dataUrl: string, mimeType: string) {
+  const [, data = ''] = dataUrl.split(',');
+  const actualMimeType = dataUrlMimeType(dataUrl);
+  if (mimeType !== actualMimeType) {
+    throw new Error('Screenshot capture MIME type did not match the image payload.');
+  }
+
+  return {
+    mimeType: mimeType as 'image/jpeg' | 'image/png' | 'image/webp',
+    data,
+  };
+}
+
+function dataUrlMimeType(dataUrl: string): string {
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,/i.exec(dataUrl);
+  if (!match) throw new Error('Screenshot capture returned an unsupported image format.');
+  return match[1].toLowerCase();
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return btoa(binary);
 }
 
 function safeHost(url: string): string {
