@@ -1,4 +1,5 @@
 import {
+  AUTH_REQUIRED,
   DASHBOARD_URL,
   STUDYPILOT_CONNECT_MESSAGE,
   SUPABASE_ANON_KEY,
@@ -20,6 +21,12 @@ import type {
 const STORAGE_KEY = 'studypilot_supabase_access_session';
 const LEGACY_STORAGE_KEY = 'studypilot_supabase_session';
 const EXPIRY_SKEW_SECONDS = 30;
+
+const DEV_AUTH_STATE: ExtensionAuthState = {
+  connected: true,
+  userId: 'dev-user',
+  email: 'dev@studypilot.local',
+};
 
 class ExtensionAuthRequiredError extends Error {
   constructor(message = STUDYPILOT_CONNECT_MESSAGE) {
@@ -118,13 +125,25 @@ async function ensureAuthenticatedSession(): Promise<AuthenticatedSession> {
   assertConfigured();
 
   const stored = await readStoredSession();
-  if (!stored) throw new ExtensionAuthRequiredError();
+  if (!stored) {
+    if (!AUTH_REQUIRED) {
+      throw new ExtensionAuthRequiredError(
+        'Dev mode: no dashboard session yet. UI is unlocked; connect a real session for live AI and saves.',
+      );
+    }
+    throw new ExtensionAuthRequiredError();
+  }
 
   try {
     return normalizeSession(stored);
   } catch (error) {
     await storageRemove(STORAGE_KEY);
     await storageRemove(LEGACY_STORAGE_KEY);
+    if (!AUTH_REQUIRED) {
+      throw new ExtensionAuthRequiredError(
+        'Dev mode: stored session invalid. UI is unlocked; reconnect from the dashboard for live AI and saves.',
+      );
+    }
     throw error;
   }
 }
@@ -261,6 +280,8 @@ export async function getAuthStatus(): Promise<ExtensionAuthState> {
       email: session.email,
     };
   } catch (error) {
+    if (!AUTH_REQUIRED) return DEV_AUTH_STATE;
+
     return {
       connected: false,
       error: error instanceof Error ? error.message : STUDYPILOT_CONNECT_MESSAGE,
@@ -309,6 +330,24 @@ export async function requestLiveToken(sessionId?: string): Promise<LiveTokenRes
 }
 
 export async function requestCoaching(
+  request: CoachingRequest,
+): Promise<CoachingResponse> {
+  try {
+    return await requestCoachingAuthenticated(request);
+  } catch (error) {
+    if (!AUTH_REQUIRED && error instanceof ExtensionAuthRequiredError) {
+      return {
+        title: titleForAction(request.action, request.question),
+        text:
+          'Dev mode (auth disabled): the panel is unlocked without a dashboard session. ' +
+          'Connect StudyPilot from the dashboard to get live AI coaching.',
+      };
+    }
+    throw error;
+  }
+}
+
+async function requestCoachingAuthenticated(
   request: CoachingRequest,
 ): Promise<CoachingResponse> {
   const response = await edgeFetch('socratic-coach', {
