@@ -1,6 +1,8 @@
 import {
-  AUTH_REQUIRED,
   DASHBOARD_URL,
+  LOCAL_DEV_EMAIL,
+  LOCAL_DEV_MODE,
+  LOCAL_DEV_PASSWORD,
   STUDYPILOT_CONNECT_MESSAGE,
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
@@ -21,12 +23,8 @@ import type {
 const STORAGE_KEY = 'studypilot_supabase_access_session';
 const LEGACY_STORAGE_KEY = 'studypilot_supabase_session';
 const EXPIRY_SKEW_SECONDS = 30;
-
-const DEV_AUTH_STATE: ExtensionAuthState = {
-  connected: true,
-  userId: 'dev-user',
-  email: 'dev@studypilot.local',
-};
+let localSessionInFlight: Promise<AuthenticatedSession> | null = null;
+let validatedLocalSession: AuthenticatedSession | null = null;
 
 class ExtensionAuthRequiredError extends Error {
   constructor(message = STUDYPILOT_CONNECT_MESSAGE) {
@@ -46,11 +44,26 @@ interface JwtPayload {
   sub?: string;
   email?: string;
   exp?: number;
+  iss?: string;
 }
 
 interface SummarizeSessionResult {
   summary?: string;
   actionItems?: string[];
+}
+
+interface LocalAuthResponse {
+  access_token?: string;
+  expires_at?: number;
+  expires_in?: number;
+  user?: {
+    id?: string;
+    email?: string | null;
+  };
+  error?: string;
+  error_description?: string;
+  message?: string;
+  msg?: string;
 }
 
 function assertConfigured() {
@@ -124,28 +137,169 @@ async function writeStoredSession(session: ExtensionAuthSession): Promise<void> 
 async function ensureAuthenticatedSession(): Promise<AuthenticatedSession> {
   assertConfigured();
 
-  const stored = await readStoredSession();
-  if (!stored) {
-    if (!AUTH_REQUIRED) {
-      throw new ExtensionAuthRequiredError(
-        'Dev mode: no dashboard session yet. UI is unlocked; connect a real session for live AI and saves.',
-      );
+  if (LOCAL_DEV_MODE && validatedLocalSession) {
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      typeof validatedLocalSession.expiresAt !== 'number' ||
+      validatedLocalSession.expiresAt > now + EXPIRY_SKEW_SECONDS
+    ) {
+      return validatedLocalSession;
     }
-    throw new ExtensionAuthRequiredError();
+    validatedLocalSession = null;
   }
 
-  try {
-    return normalizeSession(stored);
-  } catch (error) {
-    await storageRemove(STORAGE_KEY);
-    await storageRemove(LEGACY_STORAGE_KEY);
-    if (!AUTH_REQUIRED) {
-      throw new ExtensionAuthRequiredError(
-        'Dev mode: stored session invalid. UI is unlocked; reconnect from the dashboard for live AI and saves.',
-      );
+  const stored = await readStoredSession();
+  if (stored) {
+    try {
+      const normalized = normalizeSession(stored);
+      if (!LOCAL_DEV_MODE) {
+        return normalized;
+      }
+      if (
+        isConfiguredLocalSession(stored) &&
+        await validateLocalAccessToken(normalized.accessToken)
+      ) {
+        validatedLocalSession = normalized;
+        return normalized;
+      }
+      await storageRemove(STORAGE_KEY);
+      await storageRemove(LEGACY_STORAGE_KEY);
+    } catch (error) {
+      await storageRemove(STORAGE_KEY);
+      await storageRemove(LEGACY_STORAGE_KEY);
+      if (!LOCAL_DEV_MODE) throw error;
     }
-    throw error;
   }
+
+  if (LOCAL_DEV_MODE) return ensureLocalDevSession();
+  throw new ExtensionAuthRequiredError();
+}
+
+async function validateLocalAccessToken(accessToken: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function isConfiguredLocalSession(session: ExtensionAuthSession): boolean {
+  const payload = decodeJwtPayload(session.access_token);
+  return (
+    (session.email ?? payload?.email) === LOCAL_DEV_EMAIL &&
+    payload?.iss === `${SUPABASE_URL}/auth/v1`
+  );
+}
+
+function ensureLocalDevSession(): Promise<AuthenticatedSession> {
+  if (localSessionInFlight) return localSessionInFlight;
+
+  localSessionInFlight = createLocalDevSession().finally(() => {
+    localSessionInFlight = null;
+  });
+
+  return localSessionInFlight;
+}
+
+async function createLocalDevSession(): Promise<AuthenticatedSession> {
+  const signIn = await localAuthFetch('token?grant_type=password', {
+    email: LOCAL_DEV_EMAIL,
+    password: LOCAL_DEV_PASSWORD,
+  });
+
+  let session = sessionFromLocalAuth(signIn.data);
+
+  if (!session) {
+    const signUp = await localAuthFetch('signup', {
+      email: LOCAL_DEV_EMAIL,
+      password: LOCAL_DEV_PASSWORD,
+      data: {
+        name: 'Local Developer',
+        initials: 'LD',
+      },
+    });
+    session = sessionFromLocalAuth(signUp.data);
+
+    if (!session) {
+      // The dashboard may have created the shared local user concurrently.
+      const retry = await localAuthFetch('token?grant_type=password', {
+        email: LOCAL_DEV_EMAIL,
+        password: LOCAL_DEV_PASSWORD,
+      });
+      session = sessionFromLocalAuth(retry.data);
+
+      if (!session) {
+        throw new Error(
+          `Local Supabase authentication failed: ${
+            localAuthError(retry.data) ??
+            localAuthError(signUp.data) ??
+            localAuthError(signIn.data) ??
+            'no session returned'
+          }`,
+        );
+      }
+    }
+  }
+
+  await writeStoredSession(session);
+  validatedLocalSession = normalizeSession(session);
+  return validatedLocalSession;
+}
+
+async function localAuthFetch(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<{ data: LocalAuthResponse }> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Local Supabase is unavailable: ${detail}`);
+  }
+
+  let data: LocalAuthResponse = {};
+  try {
+    data = await response.json() as LocalAuthResponse;
+  } catch {
+    // The final retry below reports a stable error if no session is present.
+  }
+
+  return { data };
+}
+
+function sessionFromLocalAuth(data: LocalAuthResponse): ExtensionAuthSession | null {
+  if (!data.access_token || !data.user?.id) return null;
+
+  return {
+    access_token: data.access_token,
+    user_id: data.user.id,
+    email: data.user.email ?? LOCAL_DEV_EMAIL,
+    expires_at:
+      data.expires_at ??
+      (typeof data.expires_in === 'number'
+        ? Math.floor(Date.now() / 1000) + data.expires_in
+        : undefined),
+  };
+}
+
+function localAuthError(data: LocalAuthResponse): string | null {
+  return data.error_description ?? data.message ?? data.msg ?? data.error ?? null;
 }
 
 function normalizeSession(session: ExtensionAuthSession): AuthenticatedSession {
@@ -266,6 +420,7 @@ export async function storeExtensionSession(
 }
 
 export async function clearExtensionSession(): Promise<ExtensionAuthState> {
+  validatedLocalSession = null;
   await storageRemove(STORAGE_KEY);
   await storageRemove(LEGACY_STORAGE_KEY);
   return { connected: false };
@@ -280,8 +435,6 @@ export async function getAuthStatus(): Promise<ExtensionAuthState> {
       email: session.email,
     };
   } catch (error) {
-    if (!AUTH_REQUIRED) return DEV_AUTH_STATE;
-
     return {
       connected: false,
       error: error instanceof Error ? error.message : STUDYPILOT_CONNECT_MESSAGE,
@@ -330,24 +483,6 @@ export async function requestLiveToken(sessionId?: string): Promise<LiveTokenRes
 }
 
 export async function requestCoaching(
-  request: CoachingRequest,
-): Promise<CoachingResponse> {
-  try {
-    return await requestCoachingAuthenticated(request);
-  } catch (error) {
-    if (!AUTH_REQUIRED && error instanceof ExtensionAuthRequiredError) {
-      return {
-        title: titleForAction(request.action, request.question),
-        text:
-          'Dev mode (auth disabled): the panel is unlocked without a dashboard session. ' +
-          'Connect StudyPilot from the dashboard to get live AI coaching.',
-      };
-    }
-    throw error;
-  }
-}
-
-async function requestCoachingAuthenticated(
   request: CoachingRequest,
 ): Promise<CoachingResponse> {
   const response = await edgeFetch('socratic-coach', {

@@ -89,14 +89,7 @@ function isExtensionRuntime(): boolean {
 
 function isDashboardBridgeOrigin(): boolean {
   try {
-    const dashboardHost = new URL(DASHBOARD_URL).hostname;
-    const currentHost = window.location.hostname;
-
-    return (
-      currentHost === dashboardHost ||
-      currentHost === 'localhost' ||
-      currentHost === '127.0.0.1'
-    );
+    return window.location.origin === new URL(DASHBOARD_URL).origin;
   } catch {
     return false;
   }

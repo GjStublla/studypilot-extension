@@ -21,6 +21,37 @@ bundle.
 
 ## Run Locally
 
+### Full local StudyPilot stack
+
+Use this mode with the sibling `studypilot` repository's local Supabase stack.
+It signs in or creates the shared `dev@studypilot.local` account automatically,
+so the unpacked extension can call real local Edge Functions and save local data
+without visiting a login screen.
+
+1. Start Supabase, local Edge Functions, and `npm run dev:local` in the
+   `studypilot` repository.
+2. Build and load the isolated local package. The repository tracks the
+   standard public Supabase CLI URL and anon key in `.env.studypilot-local`, so
+   no extension secret setup is required:
+
+```bash
+npm install
+npm run build:local
+```
+
+Load `dist-local` from `chrome://extensions`. Chrome labels it
+**Study Pilot (Local)** and grants localhost access only in that build. The
+local extension reauthenticates automatically when its access token expires.
+AI usage is bypassed by the local Edge Function runtime; the extension itself
+does not weaken authentication or quota handling.
+
+The normal `npm run build` command still writes `dist`, targets the configured
+hosted project, requires a dashboard session, and has no localhost host
+permissions. It fails fast if either configured production URL points at
+localhost, preventing a local package from being mistaken for a release build.
+
+### UI preview and production build
+
 ```bash
 npm install
 npm run build
@@ -55,7 +86,8 @@ A standalone UI preview (no extension runtime needed) is served at `http://127.0
 1. Open `chrome://extensions`.
 2. Enable Developer mode.
 3. Choose Load unpacked.
-4. Select the generated `dist` folder after `npm run build`.
+4. Select `dist` after `npm run build`, or `dist-local` after
+   `npm run build:local`.
 5. Open any normal `http` or `https` page and click the Study Pilot toolbar icon to toggle the panel. A small launcher orb also sits in the bottom-right corner of the page.
 
 ## One Surface
