@@ -7,11 +7,16 @@ import {
 } from '@/shared/extensionMessages';
 import {
   clearExtensionSession,
+  createDashboardChat,
+  getDashboardChatMessages,
   getAuthStatus,
-  importStudySessionToSupabase,
+  getOrCreateSessionChat,
+  getSharedChatContext,
   requestCoaching,
   requestLiveToken,
+  setActiveDashboardChat,
   storeExtensionSession,
+  syncStudySessionToSupabase,
 } from '@/shared/studypilotSupabase';
 import type {
   CaptureVisibleTabResult,
@@ -110,6 +115,61 @@ chrome.runtime.onMessage.addListener(
           );
         return true;
 
+      case 'STUDYPILOT_GET_SHARED_CONTEXT':
+        getSharedChatContext()
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_GET_CHAT_MESSAGES':
+        getDashboardChatMessages(message.payload.chatId)
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_CREATE_CHAT':
+        createDashboardChat(message.payload.title, message.payload.sessionId ?? null)
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_CONTINUE_SESSION':
+        getOrCreateSessionChat(message.payload.sessionId, message.payload.title)
+          .then(data => sendResponse({ ok: true, data }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_SELECT_CHAT':
+        setActiveDashboardChat(message.payload.chatId)
+          .then(() => sendResponse({ ok: true, data: { selected: true } }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
       case 'STUDYPILOT_REQUEST_COACHING':
         prepareCoachingRequest(message.payload, sender)
           .then(async request => ({
@@ -137,7 +197,11 @@ chrome.runtime.onMessage.addListener(
         return true;
 
       case 'STUDYPILOT_SAVE_SESSION':
-        importStudySessionToSupabase(message.payload.session)
+        syncStudySessionToSupabase(
+          message.payload.chatId,
+          message.payload.session,
+          message.payload.finalize ?? false,
+        )
           .then(data => sendResponse({ ok: true, data }))
           .catch(error =>
             sendResponse({

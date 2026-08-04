@@ -40,7 +40,7 @@ export function mountStudyPilot(options: { defaultOpen?: boolean } = {}): void {
   const host = document.createElement('div');
   host.id = HOST_ID;
 
-  const shadowRoot = host.attachShadow({ mode: 'open' });
+  const shadowRoot = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
   style.textContent = styles;
 

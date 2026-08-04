@@ -61,6 +61,43 @@ export interface DashboardSaveResult {
   warning?: string;
 }
 
+export interface DashboardChatSummary {
+  id: string;
+  sessionId: string | null;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DashboardSessionSummary {
+  id: string;
+  title: string;
+  source: string | null;
+  mode: StudyPilotSessionMode;
+  pageTitle: string | null;
+  pageUrl: string | null;
+  whenTimestamp: string;
+}
+
+export interface DashboardChatMessage {
+  id: string;
+  chatId: string;
+  sessionId: string | null;
+  role: 'user' | 'ai' | 'system';
+  text: string;
+  sequence: number;
+  requestId?: string | null;
+  originSurface?: 'dashboard' | 'extension' | 'legacy' | null;
+  createdAt: string;
+}
+
+export interface SharedChatContext {
+  userId: string;
+  chats: DashboardChatSummary[];
+  sessions: DashboardSessionSummary[];
+  activeChatId: string | null;
+}
+
 export interface CaptureVisibleTabResult {
   dataUrl: string;
   mimeType: string;
@@ -83,12 +120,15 @@ export interface ExtensionAuthState {
 }
 
 export interface CoachingRequest {
+  chatId: string;
+  requestId: string;
   action: StudyAction;
   question?: string;
+  userMessage: string;
   page: PageContext;
   context: ContextShareSettings;
-  sessionId?: string;
-  history?: CoachingHistoryTurn[];
+  originSurface: 'extension';
+  clientContext: CoachingClientContext;
   images?: CoachingImage[];
   screenshotDataUrl?: string;
 }
@@ -96,12 +136,27 @@ export interface CoachingRequest {
 export interface CoachingResponse {
   title: string;
   text: string;
+  commit: CoachingCommit;
   screenshotDataUrl?: string;
 }
 
-export interface CoachingHistoryTurn {
-  role: 'user' | 'ai' | 'system';
-  text: string;
+export interface CoachingClientContext {
+  page: {
+    title: string;
+    url?: string;
+  };
+  action: StudyAction;
+  selection?: string;
+  integrity: string;
+}
+
+export interface CoachingCommit {
+  chatId: string;
+  requestId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  userSequence: number;
+  assistantSequence: number;
 }
 
 export interface CoachingImage {
@@ -110,9 +165,12 @@ export interface CoachingImage {
 }
 
 export interface StudyTranscriptTurn {
+  id: string;
   role: 'user' | 'ai' | 'system';
   text: string;
   atSeconds: number;
+  sequence: number;
+  createdAt?: string;
 }
 
 export type LiveTokenStatus = 'stub' | 'ready' | 'fallback' | 'proxy_required';

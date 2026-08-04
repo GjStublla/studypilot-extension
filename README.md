@@ -6,13 +6,17 @@ Study Pilot is a Chrome Manifest V3 extension MVP for a voice-first study compan
 
 The main question box and the Summarize, Explain, Quiz Me, and Flashcards
 actions call StudyPilot's Supabase Edge Functions from the background worker.
-The extension sends text, recent transcript history, page context, and an
-optional compressed screenshot to `functions/v1/socratic-coach`.
+The extension sends the plain student message, the selected shared chat id,
+page context, and an optional compressed screenshot to
+`functions/v1/socratic-coach`. Canonical history is loaded by the function
+from `dashboard_chat_messages`, so the dashboard and extension continue the
+same conversation without duplicating client-side history.
 
-Session save inserts `sessions` and `session_messages`, uploads the latest
-screenshot to the private `session-captures` bucket, and then calls
-`functions/v1/summarize-session` so the dashboard can import the transcript,
-summary, screenshot, and action items.
+Automatic session save creates a same-ID session for an unlinked chat, preserves
+the provenance and duration of an existing linked session, inserts canonical
+message ids into `session_messages` idempotently, and upserts the latest
+screenshot in the private `session-captures` bucket. The explicit Save action
+finalizes the session through `functions/v1/summarize-session`.
 
 Google service-account JSON, Gemini keys, and Supabase service-role keys must
 stay on the server side. Never copy them into this repository or into a `VITE_`
@@ -112,17 +116,18 @@ Real:
 
 - Text coaching calls `functions/v1/socratic-coach` from the background worker and returns the streamed response to the card.
 - Screenshot sharing compresses the visible tab to JPEG, sends it to the coaching function as an image part, and displays the sent screenshot in the answer card.
-- Auto-save uses the same Supabase save path as the menu Save action when the Auto-save setting is enabled.
-- Session save inserts `sessions` and `session_messages`, then calls `functions/v1/summarize-session` so the dashboard can import the session and action items.
+- The chat selector lists dashboard chats and sessions, remembers the active chat per user, and reloads canonical messages when the panel opens or regains focus.
+- Auto-save updates the same linked session and does not spend another AI request on summarization.
+- The menu Save action finalizes the current session and calls `functions/v1/summarize-session` so the dashboard can create its summary and action items.
 - Live access requests call `functions/v1/live-token`. The extension handles both the current stub response and the future real Gemini Live token response shape.
-- The extension never stores or refreshes the dashboard refresh token. When the panel runs on the StudyPilot dashboard (or localhost dashboard dev), it bridges only the access token from `sp_access_token` or Supabase's OAuth storage into `chrome.storage.local`. When that access token expires, AI and save actions ask the user to reconnect by opening the dashboard.
+- The extension never stores or refreshes the dashboard refresh token. When the panel runs on the StudyPilot dashboard (or localhost dashboard dev), it bridges only the access token as a credential from `sp_access_token` or Supabase's OAuth storage into `chrome.storage.local`; it also remembers the selected chat id per user. When that access token expires, AI and save actions ask the user to reconnect by opening the dashboard.
 
 Already local/runtime:
 
 - MV3 manifest, content script injection, and background message routing.
 - Toolbar-icon toggle of the panel, launcher orb, and all panel state transitions.
 - Read-aloud (Web Speech API) and copy-to-clipboard on the answer card.
-- Dashboard open handoff to `https://app.studypilot.ai/sessions`.
+- Dashboard open handoff to the selected `#dashboard?chat=<id>` conversation.
 - Snapshot capture permission plumbing and local answer-card screenshot preview.
 
 Pending backend/live work:
