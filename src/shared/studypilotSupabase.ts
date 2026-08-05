@@ -7,14 +7,19 @@ import {
   SUPABASE_ANON_KEY,
   SUPABASE_URL,
 } from './config';
-import { defaultPromptForAction, titleForAction } from './studyActions';
+import { titleForAction } from './studyActions';
 import type {
+  CoachingCommit,
   CoachingRequest,
   CoachingResponse,
+  DashboardChatMessage,
+  DashboardChatSummary,
   DashboardSaveResult,
+  DashboardSessionSummary,
   ExtensionAuthSession,
   ExtensionAuthState,
   LiveTokenResult,
+  SharedChatContext,
   StudyFolder,
   StudyPilotSessionMode,
   StudySession,
@@ -22,6 +27,7 @@ import type {
 
 const STORAGE_KEY = 'studypilot_supabase_access_session';
 const LEGACY_STORAGE_KEY = 'studypilot_supabase_session';
+const ACTIVE_CHAT_STORAGE_PREFIX = 'studypilot_active_chat';
 const EXPIRY_SKEW_SECONDS = 30;
 let localSessionInFlight: Promise<AuthenticatedSession> | null = null;
 let validatedLocalSession: AuthenticatedSession | null = null;
@@ -64,6 +70,36 @@ interface LocalAuthResponse {
   error_description?: string;
   message?: string;
   msg?: string;
+}
+
+interface DashboardChatRow {
+  id?: string;
+  session_id?: string | null;
+  title?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface DashboardSessionRow {
+  id?: string;
+  title?: string;
+  source?: string | null;
+  mode?: StudyPilotSessionMode;
+  page_title?: string | null;
+  page_url?: string | null;
+  when_timestamp?: string;
+}
+
+interface DashboardChatMessageRow {
+  id?: string;
+  chat_id?: string;
+  session_id?: string | null;
+  role?: 'user' | 'ai' | 'system';
+  text?: string;
+  server_sequence?: number;
+  request_id?: string | null;
+  origin_surface?: 'dashboard' | 'extension' | 'legacy' | null;
+  created_at?: string;
 }
 
 function assertConfigured() {
@@ -442,153 +478,346 @@ export async function getAuthStatus(): Promise<ExtensionAuthState> {
   }
 }
 
-export async function requestLiveToken(sessionId?: string): Promise<LiveTokenResult> {
-  // Build the WSS proxy URL directly — no HTTP preflight needed.
-  // The JWT is already available from the authenticated session.
-  // The edge function handles auth via ?jwt= query param on the WS upgrade.
-  const session = await ensureAuthenticatedSession();
-  const wssBase = SUPABASE_URL
-    .replace(/\/$/, '')
-    .replace(/^https:\/\//, 'wss://')
-    .replace(/^http:\/\//, 'ws://')
-  const webSocketUrl = `${wssBase}/functions/v1/live-token?jwt=${encodeURIComponent(session.accessToken)}`
+export async function getSharedChatContext(): Promise<SharedChatContext> {
+  const auth = await ensureAuthenticatedSession();
+  const [chats, sessions] = await Promise.all([
+    listDashboardChats(),
+    listDashboardSessions(),
+  ]);
+  const storageKey = activeChatStorageKey(auth.userId);
+  const storedChatId = await storageGet<string>(storageKey);
+  const activeChatId = storedChatId && chats.some(chat => chat.id === storedChatId)
+    ? storedChatId
+    : null;
 
-  // Also fetch model info from the function (lightweight HTTP call)
-  let model: string | undefined
-  try {
-    const response = await edgeFetch('live-token', { sessionId });
-    if (response.ok) {
-      const data = await response.json();
-      if (data?.mode === 'text_fallback') {
-        return {
-          status: 'fallback',
-          message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
-        };
-      }
-      if (typeof data?.model === 'string') model = data.model;
-    }
-  } catch {
-    // Non-fatal — we still have the WSS URL
-  }
+  if (storedChatId && !activeChatId) await storageRemove(storageKey);
 
   return {
-    status: 'ready',
-    webSocketUrl,
-    accessToken: session.accessToken,
-    model,
-    message: 'Live token ready.',
+    userId: auth.userId,
+    chats,
+    sessions,
+    activeChatId,
   };
+}
+
+export async function getDashboardChatMessages(
+  chatId: string,
+): Promise<DashboardChatMessage[]> {
+  const params = new URLSearchParams({
+    select: 'id,chat_id,session_id,role,text,server_sequence,request_id,origin_surface,created_at',
+    chat_id: `eq.${chatId}`,
+    order: 'server_sequence.asc',
+  });
+  const response = await restFetch(`dashboard_chat_messages?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+
+  if (!response.ok) throw await responseError(response);
+  const rows = await parseJsonResponse<DashboardChatMessageRow[]>(response);
+  return rows.map((row, index) => mapDashboardChatMessage(row, index));
+}
+
+export async function createDashboardChat(
+  title: string,
+  sessionId: string | null = null,
+): Promise<DashboardChatSummary> {
+  if (sessionId) return getOrCreateSessionChat(sessionId, title);
+
+  const auth = await ensureAuthenticatedSession();
+  const response = await restFetch('dashboard_chats?select=id,session_id,title,created_at,updated_at', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: auth.userId,
+      title: normalizedChatTitle(title),
+      origin_surface: 'extension',
+    }),
+  });
+
+  if (!response.ok) throw await responseError(response);
+  const rows = await parseJsonResponse<DashboardChatRow[]>(response);
+  const chat = mapDashboardChat(rows[0]);
+  await setActiveDashboardChat(chat.id);
+  return chat;
+}
+
+export async function getOrCreateSessionChat(
+  sessionId: string,
+  title: string,
+): Promise<DashboardChatSummary> {
+  const response = await restFetch('rpc/get_or_create_session_chat', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      p_session_id: sessionId,
+      p_title: normalizedChatTitle(title),
+      p_origin_surface: 'extension',
+    }),
+  });
+
+  if (!response.ok) throw await responseError(response);
+  const raw = await parseJsonResponse<DashboardChatRow | DashboardChatRow[]>(response);
+  const chat = mapDashboardChat(Array.isArray(raw) ? raw[0] : raw);
+  await setActiveDashboardChat(chat.id);
+  return chat;
+}
+
+export async function setActiveDashboardChat(chatId: string | null): Promise<void> {
+  const auth = await ensureAuthenticatedSession();
+  const storageKey = activeChatStorageKey(auth.userId);
+  if (chatId) await storageSet(storageKey, chatId);
+  else await storageRemove(storageKey);
+}
+
+async function listDashboardChats(): Promise<DashboardChatSummary[]> {
+  const params = new URLSearchParams({
+    select: 'id,session_id,title,created_at,updated_at',
+    order: 'updated_at.desc,id.desc',
+    limit: '50',
+  });
+  const response = await restFetch(`dashboard_chats?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await parseJsonResponse<DashboardChatRow[]>(response)).map(mapDashboardChat);
+}
+
+async function listDashboardSessions(): Promise<DashboardSessionSummary[]> {
+  const params = new URLSearchParams({
+    select: 'id,title,source,mode,page_title,page_url,when_timestamp',
+    order: 'when_timestamp.desc,id.desc',
+    limit: '50',
+  });
+  const response = await restFetch(`sessions?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw await responseError(response);
+  return (await parseJsonResponse<DashboardSessionRow[]>(response)).map(mapDashboardSession);
+}
+
+export async function requestLiveToken(sessionId?: string): Promise<LiveTokenResult> {
+  const response = await edgeFetch('live-token', { sessionId });
+  if (!response.ok) throw await responseError(response);
+
+  const data = await response.json();
+
+  if (data?.mode === 'text_fallback') {
+    return {
+      status: 'fallback',
+      message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
+    };
+  }
+
+  if (data?.mode === 'proxy_required') {
+    return {
+      status: 'proxy_required',
+      message: typeof data.reason === 'string' ? data.reason : 'Live coaching requires a backend WebSocket proxy.',
+    };
+  }
+
+  if (typeof data?.accessToken === 'string' && typeof data?.webSocketUrl === 'string') {
+    return {
+      status: 'ready',
+      webSocketUrl: data.webSocketUrl,
+      tokenExpiresAt: data.expiresAt,
+      message: 'Live token ready.',
+    };
+  }
+
+  if (typeof data?.ephemeralToken === 'string') {
+    return {
+      status: 'stub',
+      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
+      message: 'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
+    };
+  }
+
+  throw new Error('Unexpected live-token response from StudyPilot.');
 }
 
 export async function requestCoaching(
   request: CoachingRequest,
 ): Promise<CoachingResponse> {
-  const response = await edgeFetch('socratic-coach', {
-    sessionId: request.sessionId,
-    userMessage: buildCoachingMessage(request),
-    history: request.history ?? [],
-    images: request.images ?? [],
-    clientContext: {
-      page: {
-        title: request.page.sourceTitle || undefined,
-        url: request.context.pageUrl ? request.page.sourceUrl : undefined,
-      },
-      action: request.action,
-      selection: request.context.selectedText ? request.page.selectedText : undefined,
-      screenshotShared: request.context.screenshot,
-    },
-    originSurface: 'extension',
-  });
+  const response = await edgeFetch('socratic-coach', coachingRequestBody(request));
 
   if (!response.ok) throw await responseError(response);
   if (!response.body) throw new Error('StudyPilot AI returned an empty stream.');
 
-  const reader = response.body.getReader();
+  const streamed = await parseCoachingSseStream(response.body, {
+    chatId: request.chatId,
+    requestId: request.requestId,
+  });
+
+  return {
+    title: titleForAction(request.action, request.question),
+    text: streamed.text.trim(),
+    commit: streamed.commit,
+  };
+}
+
+export function coachingRequestBody(request: CoachingRequest) {
+  return {
+    chatId: request.chatId,
+    requestId: request.requestId,
+    userMessage: request.userMessage,
+    originSurface: request.originSurface,
+    clientContext: request.clientContext,
+    images: request.images ?? [],
+  };
+}
+
+export async function parseCoachingSseStream(
+  stream: ReadableStream<Uint8Array>,
+  expected: { chatId: string; requestId: string },
+): Promise<{ text: string; commit: CoachingCommit }> {
+  const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  let commit: CoachingCommit | null = null;
+  let doneReceived = false;
+
+  const consumeLine = (line: string) => {
+    const clean = line.trim();
+    if (!clean.startsWith('data:')) return;
+
+    const raw = clean.slice(5).trim();
+    if (raw === '[DONE]') {
+      if (!commit) {
+        throw new Error('StudyPilot AI stream ended before the response was saved.');
+      }
+      doneReceived = true;
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+
+    if (hasStringProperty(parsed, 'error')) throw new Error(parsed.error);
+    if (isCoachingCommit(parsed)) {
+      if (parsed.chatId !== expected.chatId || parsed.requestId !== expected.requestId) {
+        throw new Error('StudyPilot AI returned a commit for a different request.');
+      }
+      commit = parsed;
+      return;
+    }
+
+    // Token events remain compatible with the original `{ text }` stream.
+    if (hasStringProperty(parsed, 'text')) text += parsed.text;
+  };
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
+    const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      const clean = line.trim();
-      if (!clean.startsWith('data: ')) continue;
-
-      const raw = clean.slice(6).trim();
-      if (raw === '[DONE]') {
-        return {
-          title: titleForAction(request.action, request.question),
-          text: text.trim(),
-        };
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        continue;
-      }
-
-      if (hasStringProperty(parsed, 'error')) throw new Error(parsed.error);
-      if (hasStringProperty(parsed, 'text')) text += parsed.text;
-    }
+    for (const line of lines) consumeLine(line);
+    if (doneReceived) break;
   }
 
-  return {
-    title: titleForAction(request.action, request.question),
-    text: text.trim(),
-  };
+  buffer += decoder.decode();
+  if (buffer.trim()) consumeLine(buffer);
+  if (!doneReceived || !commit) {
+    throw new Error('StudyPilot AI stream closed before the response was committed.');
+  }
+
+  return { text, commit };
 }
 
-export async function importStudySessionToSupabase(
+export async function syncStudySessionToSupabase(
+  chatId: string,
   session: StudySession,
+  finalize = false,
 ): Promise<DashboardSaveResult> {
   const auth = await ensureAuthenticatedSession();
-  const activeRubricId = await getActiveRubricId(auth.userId);
-  const remoteSessionId = session.remoteSessionId ?? session.id ?? crypto.randomUUID();
+  const chat = await getDashboardChat(chatId);
+  const activeRubricId = chat.sessionId ? null : await getActiveRubricId(auth.userId);
+  const remoteSessionId = chat.sessionId ?? chat.id;
   const screenshotPath = session.screenshotDataUrl
     ? await uploadSessionCapture(auth, remoteSessionId, session.screenshotDataUrl)
     : null;
 
-  const response = await restFetch('sessions?select=id', {
-    method: 'POST',
-    headers: {
-      Prefer: 'return=representation',
-    },
-    body: JSON.stringify({
-      id: remoteSessionId,
-      user_id: auth.userId,
-      rubric_id: activeRubricId,
-      title: session.title || session.sourceTitle || 'StudyPilot session',
-      source: 'Chrome Extension',
-      mode: session.mode ?? modeForFolder(session.folder),
+  let savedRemoteSessionId = remoteSessionId;
+
+  if (chat.sessionId) {
+    if (screenshotPath) {
+      const screenshotResponse = await restFetch(
+        `sessions?id=eq.${encodeURIComponent(remoteSessionId)}&select=id`,
+        {
+          method: 'PATCH',
+          headers: { Prefer: 'return=representation' },
+          body: JSON.stringify({ screenshot_path: screenshotPath }),
+        },
+      );
+      if (!screenshotResponse.ok) throw await responseError(screenshotResponse);
+
+      const savedSession = await parseJsonResponse<Array<{ id?: string }>>(screenshotResponse);
+      if (savedSession[0]?.id !== remoteSessionId) {
+        throw new Error('StudyPilot could not update the linked session capture.');
+      }
+    }
+  } else {
+    const sessionDetails: Record<string, unknown> = {
       duration_seconds: session.durationSeconds ?? durationFromTranscript(session.transcript),
       page_title: session.sourceTitle,
       page_url: session.sourceUrl,
-      screenshot_path: screenshotPath,
-      when_timestamp: session.createdAt,
-    }),
-  });
+    };
+    if (screenshotPath) sessionDetails.screenshot_path = screenshotPath;
 
-  if (!response.ok) throw await responseError(response);
+    const response = await restFetch('sessions?on_conflict=id&select=id', {
+      method: 'POST',
+      headers: {
+        Prefer: 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify({
+        ...sessionDetails,
+        id: remoteSessionId,
+        user_id: auth.userId,
+        rubric_id: activeRubricId,
+        title: session.title || session.sourceTitle || chat.title || 'StudyPilot session',
+        source: 'Chrome Extension',
+        mode: session.mode ?? modeForFolder(session.folder),
+        when_timestamp: session.createdAt,
+      }),
+    });
+    if (!response.ok) throw await responseError(response);
 
-  const savedSession = await parseJsonResponse<Array<{ id?: string }>>(response);
-  const savedRemoteSessionId = savedSession[0]?.id;
-  if (!savedRemoteSessionId) throw new Error('StudyPilot session was saved without a dashboard id.');
+    const savedSession = await parseJsonResponse<Array<{ id?: string }>>(response);
+    const createdSessionId = savedSession[0]?.id;
+    if (!createdSessionId) throw new Error('StudyPilot session was saved without a dashboard id.');
+    savedRemoteSessionId = createdSessionId;
+  }
+
+  if (!chat.sessionId) {
+    const linkResponse = await restFetch(
+      'rpc/link_dashboard_chat_session',
+      {
+        method: 'POST',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ p_chat_id: chat.id }),
+      },
+    );
+    if (!linkResponse.ok) throw await responseError(linkResponse);
+    const linkedRaw = await parseJsonResponse<DashboardChatRow | DashboardChatRow[]>(linkResponse);
+    const linkedChat = Array.isArray(linkedRaw) ? linkedRaw[0] : linkedRaw;
+    if (linkedChat?.session_id !== savedRemoteSessionId) {
+      throw new Error('StudyPilot saved the session but could not link it to the selected chat.');
+    }
+  }
 
   const messages = buildSessionMessages(savedRemoteSessionId, session);
 
   if (messages.length > 0) {
-    const messagesResponse = await restFetch('session_messages', {
+    const messagesResponse = await restFetch('session_messages?on_conflict=id', {
       method: 'POST',
       headers: {
-        Prefer: 'return=minimal',
+        Prefer: 'resolution=ignore-duplicates,return=minimal',
       },
       body: JSON.stringify(messages),
     });
@@ -596,9 +825,11 @@ export async function importStudySessionToSupabase(
     if (!messagesResponse.ok) throw await responseError(messagesResponse);
   }
 
-  const summary = await summarizeSession(remoteSessionId).catch(error => ({
-    warning: error instanceof Error ? error.message : 'Session summary failed.',
-  }));
+  const summary = finalize
+    ? await summarizeSession(remoteSessionId).catch(error => ({
+        warning: error instanceof Error ? error.message : 'Session summary failed.',
+      }))
+    : {};
 
   const savedStudySession: StudySession = {
     ...session,
@@ -610,11 +841,26 @@ export async function importStudySessionToSupabase(
     ok: true,
     session: savedStudySession,
     remoteSessionId: savedRemoteSessionId,
-    dashboardUrl: `${DASHBOARD_URL}/${savedRemoteSessionId}`,
+    dashboardUrl: dashboardChatUrl(chat.id),
     summary: 'summary' in summary ? summary.summary : undefined,
     actionItems: 'actionItems' in summary ? summary.actionItems : undefined,
     warning: 'warning' in summary ? summary.warning : undefined,
   };
+}
+
+async function getDashboardChat(chatId: string): Promise<DashboardChatSummary> {
+  const params = new URLSearchParams({
+    select: 'id,session_id,title,created_at,updated_at',
+    id: `eq.${chatId}`,
+    limit: '1',
+  });
+  const response = await restFetch(`dashboard_chats?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw await responseError(response);
+  const rows = await parseJsonResponse<DashboardChatRow[]>(response);
+  if (!rows[0]) throw new Error('The selected StudyPilot chat is no longer available.');
+  return mapDashboardChat(rows[0]);
 }
 
 async function getActiveRubricId(userId: string): Promise<string | null> {
@@ -650,56 +896,18 @@ function modeForFolder(folder: StudyFolder): StudyPilotSessionMode {
   return 'Study Coach';
 }
 
-function buildCoachingMessage(request: CoachingRequest): string {
-  const selectedText =
-    request.context.selectedText && request.page.selectedText
-      ? request.page.selectedText
-      : null;
-  const screenshotNote = request.context.screenshot
-    ? 'The student shared a current screenshot with this request. Use it as visual context when relevant.'
-    : 'The student did not share a screenshot.';
-  const pageUrl = request.context.pageUrl ? request.page.sourceUrl : 'not shared';
-
-  return [
-    'StudyPilot extension request.',
-    `Action: ${labelForAction(request.action)}.`,
-    `Page title: ${request.page.sourceTitle || 'unknown'}.`,
-    `Page URL: ${pageUrl}.`,
-    `Selected text: ${selectedText || 'none shared'}.`,
-    screenshotNote,
-    'Academic-integrity rule: coach the student with explanations, questions, study strategies, and revision guidance. Do not write final submission-ready assignment content.',
-    `Student request: ${request.question?.trim() || defaultPromptForAction(request.action)}.`,
-  ].join('\n');
-}
-
-function buildSessionMessages(remoteSessionId: string, session: StudySession) {
+export function buildSessionMessages(remoteSessionId: string, session: StudySession) {
   const transcript = (session.transcript ?? [])
     .filter(turn => turn.text.trim().length > 0)
     .sort((a, b) => a.atSeconds - b.atSeconds);
 
-  if (transcript.length > 0) {
-    return transcript.map(turn => ({
-      session_id: remoteSessionId,
-      role: turn.role,
-      message_text: turn.text.trim(),
-      time_offset_seconds: Math.max(0, Math.round(turn.atSeconds)),
-    }));
-  }
-
-  return [
-    {
-      session_id: remoteSessionId,
-      role: 'user',
-      message_text: session.question,
-      time_offset_seconds: 0,
-    },
-    {
-      session_id: remoteSessionId,
-      role: 'ai',
-      message_text: session.answer,
-      time_offset_seconds: 1,
-    },
-  ].filter(message => message.message_text.trim().length > 0);
+  return transcript.map(turn => ({
+    id: turn.id,
+    session_id: remoteSessionId,
+    role: turn.role,
+    message_text: turn.text.trim(),
+    time_offset_seconds: Math.max(0, Math.round(turn.atSeconds)),
+  }));
 }
 
 function durationFromTranscript(transcript?: StudySession['transcript']): number {
@@ -716,6 +924,7 @@ async function uploadSessionCapture(
   const path = `${auth.userId}/${sessionId}/capture.jpg`;
   const headers = authHeaders(auth);
   headers.set('Content-Type', image.mimeType);
+  headers.set('x-upsert', 'true');
 
   const response = await fetch(
     `${SUPABASE_URL}/storage/v1/object/session-captures/${encodeStoragePath(path)}`,
@@ -753,20 +962,6 @@ function encodeStoragePath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-function labelForAction(action: CoachingRequest['action']): string {
-  switch (action) {
-    case 'summarize':
-      return 'summarize the current study material';
-    case 'quiz':
-      return 'ask a short formative quiz';
-    case 'flashcards':
-      return 'draft study flashcards from the context';
-    case 'explain':
-    default:
-      return 'explain or coach';
-  }
-}
-
 function hasStringProperty<K extends string>(
   value: unknown,
   key: K,
@@ -775,4 +970,80 @@ function hasStringProperty<K extends string>(
     && value !== null
     && key in value
     && typeof (value as Record<K, unknown>)[key] === 'string';
+}
+
+function isCoachingCommit(value: unknown): value is CoachingCommit & { type: 'commit' } {
+  if (!isObject(value) || value.type !== 'commit') return false;
+  return (
+    typeof value.chatId === 'string'
+    && typeof value.requestId === 'string'
+    && typeof value.userMessageId === 'string'
+    && typeof value.assistantMessageId === 'string'
+    && typeof value.userSequence === 'number'
+    && typeof value.assistantSequence === 'number'
+  );
+}
+
+function mapDashboardChat(row: DashboardChatRow | undefined): DashboardChatSummary {
+  if (!row?.id) throw new Error('StudyPilot returned an invalid dashboard chat.');
+  return {
+    id: row.id,
+    sessionId: row.session_id ?? null,
+    title: row.title?.trim() || 'New chat',
+    createdAt: row.created_at ?? new Date(0).toISOString(),
+    updatedAt: row.updated_at ?? row.created_at ?? new Date(0).toISOString(),
+  };
+}
+
+function mapDashboardSession(row: DashboardSessionRow): DashboardSessionSummary {
+  if (!row.id || !row.mode) throw new Error('StudyPilot returned an invalid dashboard session.');
+  return {
+    id: row.id,
+    title: row.title?.trim() || 'Study session',
+    source: row.source ?? null,
+    mode: row.mode,
+    pageTitle: row.page_title ?? null,
+    pageUrl: row.page_url ?? null,
+    whenTimestamp: row.when_timestamp ?? new Date(0).toISOString(),
+  };
+}
+
+function mapDashboardChatMessage(
+  row: DashboardChatMessageRow,
+  fallbackSequence: number,
+): DashboardChatMessage {
+  if (!row.id || !row.chat_id || !row.role || typeof row.text !== 'string') {
+    throw new Error('StudyPilot returned an invalid dashboard chat message.');
+  }
+  return {
+    id: row.id,
+    chatId: row.chat_id,
+    sessionId: row.session_id ?? null,
+    role: row.role,
+    text: row.text,
+    sequence: row.server_sequence ?? fallbackSequence + 1,
+    requestId: row.request_id,
+    originSurface: row.origin_surface,
+    createdAt: row.created_at ?? new Date(0).toISOString(),
+  };
+}
+
+function normalizedChatTitle(title: string): string {
+  const normalized = title.trim().replace(/\s+/g, ' ');
+  return normalized.slice(0, 80) || 'New chat';
+}
+
+function activeChatStorageKey(userId: string): string {
+  return `${ACTIVE_CHAT_STORAGE_PREFIX}:${userId}`;
+}
+
+export function dashboardChatUrl(chatId: string | null): string {
+  const base = DASHBOARD_URL.split('#')[0];
+  return chatId
+    ? `${base}#dashboard?chat=${encodeURIComponent(chatId)}`
+    : `${base}#dashboard`;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

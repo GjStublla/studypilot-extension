@@ -1,76 +1,91 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  BookOpen,
+  BookmarkCheck,
   Camera,
-  CheckCircle2,
+  Check,
   ChevronDown,
   Copy,
   Crown,
   ExternalLink,
-  FileText,
-  HelpCircle,
-  Lightbulb,
   Mic,
+  MicOff,
+  Minus,
   MoreVertical,
   Pause,
   Pin,
   Play,
-  RotateCcw,
+  Plus,
+  RefreshCw,
   Send,
   Settings,
   ShieldCheck,
-  Square,
   ThumbsDown,
   ThumbsUp,
-  Type,
   Volume2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type {
-  ChangeEvent,
-  Dispatch,
-  KeyboardEvent,
-  ReactNode,
-  SetStateAction,
-} from 'react';
-import symbolLogoUrl from '../../02_symbol_mark_transparent.png';
-import {
-  DASHBOARD_URL,
-  createMockStudySession,
-  saveStudySession,
-} from '@/shared/mockDashboard';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
+import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
   isStudyPilotRuntimeMessage,
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
+import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
+import { findCommittedAssistantForRequest } from './coachingReconciliation';
+import { PerChatSessionSaveQueue } from './sessionSaveQueue';
 import {
   STUDY_FOLDERS,
-  type CaptureVisibleTabResult,
+  type CoachingResponse,
   type ContextShareSettings,
+  type DashboardChatMessage,
+  type DashboardChatSummary,
   type DashboardSaveResult,
-  type GeminiQueryResult,
+  type DashboardSessionSummary,
+  type ExtensionAuthSession,
+  type ExtensionAuthState,
+  type LiveTokenResult,
   type PageContext,
+  type SharedChatContext,
   type StudyAction,
   type StudyFolder,
-  type StudyPilotStatus,
-  type StudyPilotView,
+  type StudyPhase,
+  type StudySession,
+  type StudyTranscriptTurn,
 } from '@/shared/types';
 
-const STATUS_COPY: Record<StudyPilotStatus, string> = {
-  ready: 'Ready',
-  'screenshot-ready': 'Screenshot ready',
-  'live-sharing': 'Live sharing',
-  explaining: 'Explaining',
-  saved: 'Saved',
-};
+const LOCAL_PREVIEW_TEXT =
+  'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
+const ACADEMIC_INTEGRITY_CONTEXT =
+  'Coach with explanations, questions, study strategies, and revision guidance. Do not write final submission-ready assignment content.';
 
-const ACTION_COPY: Record<StudyAction, string> = {
-  explain: 'Explain',
-  summarize: 'Summarize',
-  quiz: 'Quiz Me',
-  flashcards: 'Flashcards',
-  'step-by-step': 'Steps',
-};
+interface AnswerCard {
+  title: string;
+  body: string;
+}
+
+interface SaveSessionOptions {
+  chatId?: string;
+  questionText?: string;
+  answerText?: string;
+  transcriptSnapshot?: StudyTranscriptTurn[];
+  screenshotDataUrl?: string;
+  successNotice?: string;
+  finalize?: boolean;
+}
+
+interface QueuedSessionSave {
+  chatId: string;
+  session: StudySession;
+  finalize: boolean;
+  successNotice?: string;
+}
+
+type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
+
+const ACCESS_KEY = 'sp_access_token';
+const USER_ID_KEY = 'sp_user_id';
+const EMAIL_KEY = 'sp_email';
+const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
 
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
@@ -91,6 +106,79 @@ function isExtensionRuntime(): boolean {
   );
 }
 
+function isDashboardBridgeOrigin(): boolean {
+  try {
+    return window.location.origin === new URL(DASHBOARD_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
+function readDashboardAuthSession(): ExtensionAuthSession | null {
+  if (!isDashboardBridgeOrigin()) return null;
+
+  try {
+    const accessToken = window.localStorage.getItem(ACCESS_KEY);
+    if (accessToken) {
+      return {
+        access_token: accessToken,
+        user_id: window.localStorage.getItem(USER_ID_KEY) ?? undefined,
+        email: window.localStorage.getItem(EMAIL_KEY),
+      };
+    }
+
+    return readSupabaseStoredAuthSession();
+  } catch {
+    return null;
+  }
+}
+
+function readSupabaseStoredAuthSession(): ExtensionAuthSession | null {
+  const candidateKeys = Object.keys(window.localStorage).filter(
+    key => key === SUPABASE_OAUTH_STORAGE_KEY || /^sb-.+-auth-token$/.test(key),
+  );
+
+  for (const key of candidateKeys) {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) continue;
+
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      const session = getStoredSupabaseSession(parsed);
+      if (session) return session;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
+  if (!isObject(value)) return null;
+
+  const sessionValue =
+    isObject(value.currentSession) ? value.currentSession :
+    isObject(value.session) ? value.session :
+    value;
+
+  if (!isObject(sessionValue) || typeof sessionValue.access_token !== 'string') {
+    return null;
+  }
+
+  const user = isObject(sessionValue.user) ? sessionValue.user : null;
+  return {
+    access_token: sessionValue.access_token,
+    user_id: typeof user?.id === 'string' ? user.id : undefined,
+    email: typeof user?.email === 'string' ? user.email : null,
+    expires_at: typeof sessionValue.expires_at === 'number' ? sessionValue.expires_at : undefined,
+  };
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 async function sendRuntimeMessage<T>(
   message: StudyPilotRuntimeMessage,
 ): Promise<T | null> {
@@ -102,33 +190,69 @@ async function sendRuntimeMessage<T>(
   return response.data as T;
 }
 
-export function FloatingStudyPilot() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [view, setView] = useState<StudyPilotView>('idle');
-  const [status, setStatus] = useState<StudyPilotStatus>('ready');
+export function FloatingStudyPilot({
+  defaultOpen = false,
+}: {
+  defaultOpen?: boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  const [isPinned, setIsPinned] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const [micOn, setMicOn] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [phase, setPhase] = useState<StudyPhase>('idle');
+  const [notice, setNotice] = useState<string | null>(null);
+  const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
+  const [sharedContext, setSharedContext] = useState<SharedChatContext | null>(null);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<DashboardChatMessage[]>([]);
+  const [inFlightChatIds, setInFlightChatIds] = useState<Set<string>>(() => new Set());
+  const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [isRefreshingChats, setIsRefreshingChats] = useState(false);
+
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [lastQuestion, setLastQuestion] = useState('Ask anything about this page');
-  const [capturedScreenshot, setCapturedScreenshot] =
-    useState<CaptureVisibleTabResult | null>(null);
+  const [lastQuestion, setLastQuestion] = useState('');
+  const [card, setCard] = useState<AnswerCard>({
+    title: 'Ready to coach',
+    body: 'Ask about the page, summarize the material, or save a coaching session once the extension is connected to your StudyPilot account.',
+  });
+  const [cardOpen, setCardOpen] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLivePaused, setIsLivePaused] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [savedFolder, setSavedFolder] = useState<StudyFolder>('Biology 101');
+  const [transcript, setTranscript] = useState<StudyTranscriptTurn[]>([]);
+  const [lastScreenshotDataUrl, setLastScreenshotDataUrl] = useState<string | null>(null);
+  const [cardScreenshotDataUrl, setCardScreenshotDataUrl] = useState<string | null>(null);
+
   const [context, setContext] = useState<ContextShareSettings>({
-    screenshot: true,
+    screenshot: false,
     pageUrl: true,
     selectedText: false,
     saveToDashboard: true,
     folder: 'Biology 101',
   });
-  const requestId = useRef(0);
+
+  const noticeTimer = useRef<number | undefined>(undefined);
+  const activeChatIdRef = useRef<string | null>(null);
+  const inFlightChatIdsRef = useRef<Set<string>>(new Set());
+  const isSavingRef = useRef(false);
+  const sessionSaveQueueRef = useRef<PerChatSessionSaveQueue<QueuedSessionSave> | null>(null);
+  const refreshSequenceRef = useRef(0);
+  const creatingChatRef = useRef(false);
+
+  if (!sessionSaveQueueRef.current) {
+    sessionSaveQueueRef.current = new PerChatSessionSaveQueue(busy => {
+      isSavingRef.current = busy;
+      setIsSaving(busy);
+    });
+  }
 
   useEffect(() => {
-    const refreshSelection = () => {
-      setPage(getPageContext());
-    };
+    const refreshSelection = () => setPage(getPageContext());
 
     document.addEventListener('selectionchange', refreshSelection);
     window.addEventListener('focus', refreshSelection);
@@ -143,12 +267,9 @@ export function FloatingStudyPilot() {
     if (!isExtensionRuntime()) return;
 
     const listener = (message: unknown) => {
-      if (
-        isStudyPilotRuntimeMessage(message) &&
-        message.type === 'STUDYPILOT_OPEN_MODAL'
-      ) {
-        setIsOpen(true);
-      }
+      if (!isStudyPilotRuntimeMessage(message)) return false;
+      if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
+      if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen(value => !value);
       return false;
     };
 
@@ -157,177 +278,722 @@ export function FloatingStudyPilot() {
   }, []);
 
   useEffect(() => {
+    void bridgeDashboardSession();
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) void refreshExtensionWorkspace();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const refreshWhenFocused = () => {
+      void refreshExtensionWorkspace();
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshWhenFocused();
+    };
+
+    window.addEventListener('focus', refreshWhenFocused);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
-      requestId.current += 1;
+      window.removeEventListener('focus', refreshWhenFocused);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setMenuOpen(false);
+      if (!isPinned) setIsOpen(false);
+    };
+
+    if (isOpen) document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isPinned]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
 
-  const sourceLabel = useMemo(() => {
-    if (!page.host) return 'Current page';
-    return `${page.host} - ${page.sourceTitle}`;
-  }, [page.host, page.sourceTitle]);
+  const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
+  const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
+  const orbState: OrbState = isActiveChatSending || phase === 'thinking'
+    ? 'thinking'
+    : paused
+      ? 'paused'
+      : micOn
+        ? 'listening'
+        : 'muted';
 
-  function resetToIdle() {
-    setView('idle');
-    setStatus('ready');
-    setIsLivePaused(false);
+  const statusText = notice
+    ? notice
+    : authState?.connected === false
+      ? 'Connect dashboard'
+    : isActiveChatSending || phase === 'thinking'
+      ? 'Thinking...'
+      : paused
+        ? 'Paused'
+        : micOn
+          ? 'Listening...'
+          : 'Mic muted';
+
+  const sourceLabel = useMemo(() => {
+    if (!page.host) return 'this page';
+    return page.host;
+  }, [page.host]);
+
+  function flashNotice(text: string, duration = 2200) {
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    setNotice(text);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
   }
 
-  async function captureScreenshot() {
-    setIsOpen(true);
-    setView('thinking');
-    setStatus('explaining');
-
+  async function refreshAuthState() {
     try {
-      const capture = await sendRuntimeMessage<CaptureVisibleTabResult>({
-        type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
+      const response = await sendRuntimeMessage<ExtensionAuthState>({
+        type: 'STUDYPILOT_GET_AUTH_STATUS',
       });
-
-      if (!capture) {
-        throw new Error('Screenshot capture is only available inside the installed extension.');
-      }
-
-      setCapturedScreenshot(capture);
-      setPage(prev => ({
-        ...prev,
-        sourceTitle: capture.pageTitle || prev.sourceTitle,
-        sourceUrl: capture.pageUrl || prev.sourceUrl,
-      }));
-      setContext(prev => ({ ...prev, screenshot: true }));
-      setView('screenshot');
-      setStatus('screenshot-ready');
+      if (response) setAuthState(response);
     } catch (error) {
-      setAnswer(error instanceof Error ? error.message : String(error));
-      setView('answer');
-      setStatus('ready');
+      setAuthState({
+        connected: false,
+        error: error instanceof Error ? error.message : STUDYPILOT_CONNECT_MESSAGE,
+      });
     }
   }
 
-  function startLiveSharing() {
-    // TODO: Connect navigator.mediaDevices.getDisplayMedia through an explicit
-    // browser permission prompt when live help moves beyond the MVP mock.
-    setView('live');
-    setStatus('live-sharing');
-    setIsLivePaused(false);
-    setIsMicOn(true);
-    setIsOpen(true);
+  async function refreshExtensionWorkspace() {
+    await bridgeDashboardSession();
+    await Promise.all([
+      refreshAuthState(),
+      refreshSharedChatContext(),
+    ]);
+  }
+
+  async function refreshSharedChatContext(preferredChatId?: string | null) {
+    const refreshSequence = ++refreshSequenceRef.current;
+    setIsRefreshingChats(true);
+
+    try {
+      const response = await sendRuntimeMessage<SharedChatContext>({
+        type: 'STUDYPILOT_GET_SHARED_CONTEXT',
+      });
+      if (!response || refreshSequence !== refreshSequenceRef.current) return;
+
+      setSharedContext(response);
+      const requestedChatId = preferredChatId ?? response.activeChatId;
+      const nextChatId = requestedChatId && response.chats.some(chat => chat.id === requestedChatId)
+        ? requestedChatId
+        : null;
+      if (activeChatIdRef.current !== nextChatId) {
+        setQuestion('');
+        setLastQuestion('');
+      }
+      activeChatIdRef.current = nextChatId;
+      setActiveChatId(nextChatId);
+
+      if (nextChatId) {
+        await loadCanonicalChat(nextChatId, refreshSequence);
+      } else {
+        setChatMessages([]);
+        setTranscript([]);
+        setLastScreenshotDataUrl(null);
+        setCardScreenshotDataUrl(null);
+        setCard({
+          title: 'New conversation',
+          body: 'Ask about this page to start a shared StudyPilot chat.',
+        });
+        setPhase('idle');
+      }
+    } catch (error) {
+      if (refreshSequence !== refreshSequenceRef.current) return;
+      if (isExtensionRuntime()) {
+        const message = error instanceof Error ? error.message : 'Could not load StudyPilot chats.';
+        flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not refresh chats', 2800);
+      }
+    } finally {
+      if (refreshSequence === refreshSequenceRef.current) setIsRefreshingChats(false);
+    }
+  }
+
+  async function loadCanonicalChat(
+    chatId: string,
+    refreshSequence = ++refreshSequenceRef.current,
+  ): Promise<DashboardChatMessage[]> {
+    const messages = await sendRuntimeMessage<DashboardChatMessage[]>({
+      type: 'STUDYPILOT_GET_CHAT_MESSAGES',
+      payload: { chatId },
+    });
+    const canonicalMessages = messages ?? [];
+
+    if (
+      refreshSequence === refreshSequenceRef.current
+      && activeChatIdRef.current === chatId
+    ) {
+      applyCanonicalMessages(canonicalMessages);
+    }
+    return canonicalMessages;
+  }
+
+  function applyCanonicalMessages(messages: DashboardChatMessage[]) {
+    const visibleMessages = messages.filter(message => message.role !== 'system');
+    setChatMessages(visibleMessages);
+    const canonicalTranscript = visibleMessages.map((message, index) =>
+      transcriptTurnFromMessage(message, index));
+    setTranscript(canonicalTranscript);
+
+    const latestAi = [...visibleMessages].reverse().find(message => message.role === 'ai');
+    const latestUser = [...visibleMessages].reverse().find(message => message.role === 'user');
+    setLastQuestion(latestUser?.text ?? '');
+    if (latestAi) {
+      setCard({ title: 'Coach response', body: latestAi.text });
+      setCardOpen(true);
+      setPhase('answer');
+    } else if (latestUser) {
+      setCard({
+        title: 'Question saved',
+        body: 'This shared chat does not have a coach response yet.',
+      });
+      setCardOpen(true);
+      setPhase('answer');
+    } else if (visibleMessages.length === 0) {
+      setCard({
+        title: 'New conversation',
+        body: 'Ask about this page to start a shared StudyPilot chat.',
+      });
+      setPhase('idle');
+    }
+  }
+
+  async function selectDashboardChat(chatId: string | null) {
+    const refreshSequence = ++refreshSequenceRef.current;
+    activeChatIdRef.current = chatId;
+    setActiveChatId(chatId);
+    setQuestion('');
+    setLastQuestion('');
+    setChatMessages([]);
+    setTranscript([]);
+    setLastScreenshotDataUrl(null);
+    setCardScreenshotDataUrl(null);
+    setPhase('idle');
+
+    if (!chatId) {
+      setCard({
+        title: 'New conversation',
+        body: 'Ask about this page to start a shared StudyPilot chat.',
+      });
+    } else {
+      setCard({
+        title: 'Loading conversation',
+        body: 'Fetching the latest shared chat history.',
+      });
+    }
+
+    try {
+      await sendRuntimeMessage<{ selected: true }>({
+        type: 'STUDYPILOT_SELECT_CHAT',
+        payload: { chatId },
+      });
+      if (chatId) await loadCanonicalChat(chatId, refreshSequence);
+    } catch {
+      if (refreshSequence === refreshSequenceRef.current) {
+        flashNotice('Could not open that chat', 2600);
+      }
+    }
+  }
+
+  async function createNewDashboardChat(title = 'New chat') {
+    if (creatingChatRef.current) return null;
+    creatingChatRef.current = true;
+    setIsCreatingChat(true);
+
+    try {
+      const chat = await sendRuntimeMessage<DashboardChatSummary>({
+        type: 'STUDYPILOT_CREATE_CHAT',
+        payload: { title },
+      });
+      if (!chat) return null;
+
+      setSharedContext(previous => previous
+        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
+        : previous);
+      await selectDashboardChat(chat.id);
+      return chat;
+    } finally {
+      creatingChatRef.current = false;
+      setIsCreatingChat(false);
+    }
+  }
+
+  async function continueDashboardSession(session: DashboardSessionSummary) {
+    try {
+      const chat = await sendRuntimeMessage<DashboardChatSummary>({
+        type: 'STUDYPILOT_CONTINUE_SESSION',
+        payload: { sessionId: session.id, title: session.title },
+      });
+      if (!chat) return;
+
+      setSharedContext(previous => previous
+        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
+        : previous);
+      await selectDashboardChat(chat.id);
+      flashNotice(`Continuing ${session.title}`, 2200);
+    } catch {
+      flashNotice('Could not continue that session', 2800);
+    }
+  }
+
+  async function bridgeDashboardSession() {
+    const dashboardSession = readDashboardAuthSession();
+    if (!dashboardSession) return;
+
+    try {
+      const response = await sendRuntimeMessage<ExtensionAuthState>({
+        type: 'STUDYPILOT_CONNECT_SESSION',
+        payload: dashboardSession,
+      });
+      if (response?.connected) {
+        setAuthState(response);
+      }
+    } catch {
+      // The normal auth-status request below will expose the usable state.
+    }
   }
 
   async function runStudyAction(action: StudyAction, customQuestion?: string) {
-    const nextQuestion =
-      customQuestion?.trim() || `${ACTION_COPY[action]} this page`;
-    const currentRequest = requestId.current + 1;
-    requestId.current = currentRequest;
+    const prompt = customQuestion?.trim();
+    const studentText = prompt || defaultPromptForAction(action);
+    let chatId = activeChatIdRef.current;
+    if (!chatId && creatingChatRef.current) return;
 
-    setLastQuestion(nextQuestion);
-    setAnswer('');
-    setView('thinking');
-    setStatus('explaining');
-    setIsOpen(true);
+    if (!chatId) {
+      try {
+        const created = await createNewDashboardChat(chatTitleFromPrompt(studentText, page.sourceTitle));
+        chatId = created?.id ?? null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not create a shared chat.';
+        setCard({ title: 'Chat unavailable', body: message });
+        setCardOpen(true);
+        setPhase('answer');
+        return;
+      }
+    }
+
+    if (!chatId) {
+      setCard({ title: 'Extension runtime required', body: LOCAL_PREVIEW_TEXT });
+      setCardOpen(true);
+      setPhase('answer');
+      flashNotice('Preview mode');
+      return;
+    }
+    if (inFlightChatIdsRef.current.has(chatId)) return;
+
+    const requestId = crypto.randomUUID();
+    setChatInFlight(chatId, true);
+
+    if (activeChatIdRef.current === chatId) setPhase('thinking');
+    setFeedback(null);
+    setCopied(false);
+    setLastQuestion(studentText);
+    setCardScreenshotDataUrl(null);
 
     try {
-      const imageDataUrl =
-        context.screenshot && capturedScreenshot
-          ? capturedScreenshot.dataUrl
-          : undefined;
-      const response = await sendRuntimeMessage<GeminiQueryResult>({
-        type: 'STUDYPILOT_GEMINI_QUERY',
+      const response = await sendRuntimeMessage<CoachingResponse>({
+        type: 'STUDYPILOT_REQUEST_COACHING',
         payload: {
-          requestType: imageDataUrl ? 'screenshot' : 'question',
-          imageDataUrl,
-          question: promptForAction(action, nextQuestion),
-          context: buildQuestionContext(page, context),
+          action,
+          question: prompt,
+          userMessage: studentText,
+          chatId,
+          requestId,
+          originSurface: 'extension',
+          page,
+          context,
+          clientContext: {
+            page: {
+              title: page.sourceTitle || page.host || 'Current page',
+              ...(context.pageUrl && page.sourceUrl ? { url: page.sourceUrl } : {}),
+            },
+            action,
+            ...(context.selectedText && page.selectedText
+              ? { selection: page.selectedText }
+              : {}),
+            integrity: ACADEMIC_INTEGRITY_CONTEXT,
+          },
         },
       });
 
-      if (requestId.current !== currentRequest) return;
-      if (!response?.answer.trim()) {
-        throw new Error('The API returned an empty answer.');
+      if (!response) {
+        setCard({
+          title: 'Extension runtime required',
+          body: LOCAL_PREVIEW_TEXT,
+        });
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice('Preview mode');
+        return;
       }
 
-      setAnswer(response.answer.trim());
-      setView('answer');
-      setStatus('ready');
+      if (!response.text.trim()) {
+        throw new Error('StudyPilot AI returned an empty response.');
+      }
+
+      const responseText = response.text.trim();
+      const screenshotDataUrl = response.screenshotDataUrl ?? null;
+      const refreshSequence = activeChatIdRef.current === chatId
+        ? ++refreshSequenceRef.current
+        : -1;
+      let canonicalMessages: DashboardChatMessage[] = [];
+      let canonicalRefreshSucceeded = true;
+      try {
+        canonicalMessages = await loadCanonicalChat(chatId, refreshSequence);
+      } catch {
+        canonicalRefreshSucceeded = false;
+      }
+      const nextTranscript = canonicalMessages
+        .filter(message => message.role !== 'system')
+        .map((message, index) => transcriptTurnFromMessage(message, index));
+
+      if (activeChatIdRef.current === chatId) {
+        if (screenshotDataUrl) setLastScreenshotDataUrl(screenshotDataUrl);
+        setCardScreenshotDataUrl(screenshotDataUrl);
+        setCard({
+          title: response.title || titleForAction(action, prompt),
+          body: responseText,
+        });
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice(
+          canonicalRefreshSucceeded ? 'Coach response ready' : 'Response saved; history refresh pending',
+          canonicalRefreshSucceeded ? 2200 : 3000,
+        );
+      }
+      await refreshAuthState();
+      if (context.saveToDashboard && nextTranscript.length > 0) {
+        void persistSessionToDashboard({
+          chatId,
+          questionText: studentText,
+          answerText: responseText,
+          transcriptSnapshot: nextTranscript,
+          screenshotDataUrl: context.screenshot ? screenshotDataUrl ?? undefined : undefined,
+          successNotice: 'Saved to StudyPilot',
+        });
+      }
     } catch (error) {
-      if (requestId.current !== currentRequest) return;
-      setAnswer(error instanceof Error ? error.message : String(error));
-      setView('answer');
-      setStatus('ready');
-    }
-  }
+      const message = error instanceof Error ? error.message : 'StudyPilot AI could not respond.';
+      const errorCard: AnswerCard = {
+        title: message.includes('connected') || message.includes('signed') || message.includes('session')
+          ? 'Connect StudyPilot'
+          : 'Coach unavailable',
+        body: message.includes('StudyPilot is not connected')
+          ? STUDYPILOT_CONNECT_MESSAGE
+          : message,
+      };
+      const refreshSequence = activeChatIdRef.current === chatId
+        ? ++refreshSequenceRef.current
+        : -1;
+      let canonicalMessages: DashboardChatMessage[] = [];
 
-  async function sendToDashboard() {
-    if (!context.saveToDashboard || isSaving) return;
+      try {
+        canonicalMessages = await loadCanonicalChat(chatId, refreshSequence);
+      } catch {
+        // The coaching error remains the primary failure shown to the user.
+      }
 
-    setIsSaving(true);
-    const session = createMockStudySession({
-      page,
-      folder: context.folder,
-      question: lastQuestion,
-      answer,
-      screenshotUrl: context.screenshot ? 'mock://studypilot/screenshot' : undefined,
-      tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
-    });
+      const committedAssistant = findCommittedAssistantForRequest(canonicalMessages, requestId);
+      if (committedAssistant) {
+        const responseText = committedAssistant.text.trim();
+        const nextTranscript = canonicalMessages
+          .filter(canonicalMessage => canonicalMessage.role !== 'system')
+          .map((canonicalMessage, index) => transcriptTurnFromMessage(canonicalMessage, index));
 
-    try {
-      const response = await sendRuntimeMessage<DashboardSaveResult>({
-        type: 'STUDYPILOT_SAVE_SESSION',
-        payload: { session },
-      });
+        if (
+          activeChatIdRef.current === chatId
+          && refreshSequence === refreshSequenceRef.current
+        ) {
+          setCard({
+            title: titleForAction(action, prompt),
+            body: responseText,
+          });
+          setCardOpen(true);
+          setPhase('answer');
+          flashNotice('Coach response restored', 2200);
+        }
 
-      if (!response) await saveStudySession(session);
-      setSavedFolder(session.folder);
-      setView('saved');
-      setStatus('saved');
+        await refreshAuthState();
+        if (context.saveToDashboard && nextTranscript.length > 0) {
+          void persistSessionToDashboard({
+            chatId,
+            questionText: studentText,
+            answerText: responseText,
+            transcriptSnapshot: nextTranscript,
+            successNotice: 'Saved to StudyPilot',
+          });
+        }
+        return;
+      }
+
+      if (
+        activeChatIdRef.current === chatId
+        && refreshSequence === refreshSequenceRef.current
+      ) {
+        setCard(errorCard);
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice('Could not reach StudyPilot AI', 3000);
+      }
     } finally {
-      setIsSaving(false);
+      setChatInFlight(chatId, false);
     }
   }
 
-  async function openDashboard() {
-    try {
-      await sendRuntimeMessage({
-        type: 'STUDYPILOT_OPEN_DASHBOARD',
-        payload: { url: DASHBOARD_URL },
-      });
-    } catch {
-      window.open(DASHBOARD_URL, '_blank', 'noopener,noreferrer');
-    }
+  function setChatInFlight(chatId: string, isInFlight: boolean) {
+    const next = new Set(inFlightChatIdsRef.current);
+    if (isInFlight) next.add(chatId);
+    else next.delete(chatId);
+    inFlightChatIdsRef.current = next;
+    setInFlightChatIds(next);
   }
 
   function handleSubmit() {
     const text = question.trim();
     if (!text) return;
     setQuestion('');
-    runStudyAction('explain', text);
+    void runStudyAction('explain', text);
+  }
+
+  async function saveToDashboard() {
+    if (isSavingRef.current) return;
+
+    try {
+      await persistSessionToDashboard({ finalize: true });
+    } catch {
+      flashNotice('Could not save right now', 2800);
+    }
+  }
+
+  async function persistSessionToDashboard(options: SaveSessionOptions = {}) {
+    let targetChatId = options.chatId ?? activeChatIdRef.current;
+    if (!targetChatId) {
+      const created = await createNewDashboardChat(
+        chatTitleFromPrompt(options.questionText ?? lastQuestion, page.sourceTitle),
+      );
+      targetChatId = created?.id ?? null;
+    }
+    if (!targetChatId) return;
+    const questionText = options.questionText ?? (lastQuestion || card.title);
+    const answerText = options.answerText ?? card.body;
+    const transcriptSnapshot = options.transcriptSnapshot ?? transcript;
+    const chat = sharedContext?.chats.find(item => item.id === targetChatId) ?? null;
+    const session = createStudySession({
+      id: targetChatId,
+      page,
+      folder: context.folder,
+      question: questionText,
+      answer: answerText,
+      transcript: [...transcriptSnapshot],
+      screenshotDataUrl:
+        options.screenshotDataUrl ??
+        (context.screenshot ? lastScreenshotDataUrl ?? undefined : undefined),
+      tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
+      remoteSessionId: chat?.sessionId ?? targetChatId,
+      createdAt: chat?.createdAt,
+    });
+
+    const save: QueuedSessionSave = {
+      chatId: targetChatId,
+      session,
+      finalize: options.finalize ?? false,
+      successNotice: options.successNotice,
+    };
+    const saveQueue = sessionSaveQueueRef.current;
+    if (!saveQueue) throw new Error('StudyPilot session save queue is unavailable.');
+    await saveQueue.enqueue(save, executeSessionSave);
+  }
+
+  async function executeSessionSave(save: QueuedSessionSave) {
+    const { chatId: targetChatId, session } = save;
+
+    try {
+      const response = await sendRuntimeMessage<DashboardSaveResult>({
+        type: 'STUDYPILOT_SAVE_SESSION',
+        payload: {
+          chatId: targetChatId,
+          session,
+          finalize: save.finalize,
+        },
+      });
+
+      if (!response) {
+        setCard({
+          title: 'Extension runtime required',
+          body: 'Open the built Chrome extension to save sessions to StudyPilot.',
+        });
+        setCardOpen(true);
+        setPhase('answer');
+        flashNotice('Preview mode cannot save', 2600);
+        return;
+      }
+
+      if (activeChatIdRef.current === targetChatId) {
+        setPhase('saved');
+        flashNotice(
+          response?.warning
+            ? 'Saved; summary pending'
+            : (save.successNotice ?? (save.finalize ? 'Session saved and finalized' : `Saved to ${session.folder}`)),
+          2600,
+        );
+      }
+      if (response.remoteSessionId) {
+        setSharedContext(previous => previous
+          ? {
+              ...previous,
+              chats: previous.chats.map(item => item.id === targetChatId
+                ? { ...item, sessionId: response.remoteSessionId ?? item.sessionId }
+                : item),
+            }
+          : previous);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not save right now';
+      if (activeChatIdRef.current === targetChatId) {
+        flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not save right now');
+      }
+    }
+  }
+
+  async function openDashboard() {
+    const base = DASHBOARD_URL.split('#')[0];
+    const dashboardUrl = activeChatIdRef.current
+      ? `${base}#dashboard?chat=${encodeURIComponent(activeChatIdRef.current)}`
+      : `${base}#dashboard`;
+    try {
+      await sendRuntimeMessage({
+        type: 'STUDYPILOT_OPEN_DASHBOARD',
+        payload: { url: dashboardUrl },
+      });
+    } catch {
+      window.open(dashboardUrl, '_blank', 'noopener,noreferrer');
+    }
+  }
+
+  async function captureSnapshot() {
+    try {
+      const snapshot = await sendRuntimeMessage<{
+        dataUrl: string;
+        mimeType: string;
+      }>({
+        type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
+      });
+      if (snapshot?.dataUrl) {
+        setLastScreenshotDataUrl(snapshot.dataUrl);
+        setCardScreenshotDataUrl(snapshot.dataUrl);
+        setContext(prev => ({ ...prev, screenshot: true }));
+        flashNotice('Screenshot ready for coaching', 2600);
+      }
+    } catch {
+      flashNotice('Could not capture screenshot', 3000);
+    }
+  }
+
+  function speakAnswer() {
+    if (!('speechSynthesis' in window)) return;
+
+    if (isSpeaking) {
+      window.speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(card.body);
+    utterance.rate = 1.02;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  }
+
+  async function copyAnswer() {
+    try {
+      await navigator.clipboard.writeText(card.body);
+    } catch {
+      const scratch = document.createElement('textarea');
+      scratch.value = card.body;
+      scratch.style.position = 'fixed';
+      scratch.style.opacity = '0';
+      document.body.appendChild(scratch);
+      scratch.select();
+      document.execCommand('copy');
+      scratch.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  function toggleMic() {
+    setMicOn(value => {
+      const next = !value;
+      if (next) {
+        setPaused(false);
+        void requestLiveAccess();
+      }
+      return next;
+    });
+  }
+
+  async function requestLiveAccess() {
+    try {
+      const response = await sendRuntimeMessage<LiveTokenResult>({
+        type: 'STUDYPILOT_GET_LIVE_TOKEN',
+      });
+
+      if (!response) {
+        setMicOn(false);
+        flashNotice('Open the extension build for live coach');
+        return;
+      }
+
+      if (response.status === 'stub' || response.status === 'fallback') {
+        setMicOn(false);
+      }
+
+      flashNotice(response.message, 3600);
+      await refreshAuthState();
+    } catch (error) {
+      setMicOn(false);
+      const message = error instanceof Error ? error.message : 'Live coach unavailable';
+      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+    }
   }
 
   return (
-    <div
-      className="sp-extension"
-      data-view={view}
-      onKeyDownCapture={stopPageKeyboardShortcuts}
-      onKeyUpCapture={stopPageKeyboardShortcuts}
-    >
+    <div className="sp-extension">
       <AnimatePresence>
         {!isOpen ? (
           <motion.button
-            key="orb"
+            key="launcher"
             type="button"
-            className="sp-orb-button"
-            aria-label="Open StudyPilot"
+            className="sp-launcher"
+            aria-label="Open Study Pilot"
+            title={`Study Pilot — ask about ${sourceLabel}`}
             onClick={() => setIsOpen(true)}
-            initial={{ opacity: 0, y: 12, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.96 }}
+            initial={{ opacity: 0, scale: 0.8, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 8 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           >
-            <span className="sp-orb-mark" data-status={status}>
-              <img src={symbolLogoUrl} alt="" />
-            </span>
-            <span className="sp-orb-copy">
-              <span className="sp-orb-name">Study Pilot</span>
-              <span className="sp-orb-status">{STATUS_COPY[status]}</span>
+            <span className="sp-launcher-ring" aria-hidden="true" />
+            <span className="sp-launcher-wave" aria-hidden="true">
+              <i />
+              <i />
+              <i />
             </span>
           </motion.button>
         ) : null}
@@ -336,98 +1002,359 @@ export function FloatingStudyPilot() {
       <AnimatePresence>
         {isOpen ? (
           <motion.section
-            key="modal"
-            className="sp-modal"
+            key="panel"
+            className="sp-panel"
             role="dialog"
-            aria-label="StudyPilot study companion"
-            initial={{ opacity: 0, y: 18, scale: 0.985 }}
+            aria-label="Study Pilot"
+            initial={{ opacity: 0, y: 26, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.985 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, y: 18, scale: 0.98 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
           >
             <header className="sp-header">
               <div className="sp-brand">
-                <img className="sp-brand-logo" src={symbolLogoUrl} alt="" />
-                <div className="sp-brand-text">
-                  <strong>Study Pilot</strong>
-                  <span title={sourceLabel}>{sourceLabel}</span>
-                </div>
+                <SparkleLogo size={30} />
+                <strong>Study Pilot</strong>
               </div>
               <div className="sp-header-actions">
                 <button
                   type="button"
-                  className="sp-top-icon"
-                  aria-label="Pin StudyPilot"
+                  className="sp-icon-button"
+                  data-active={isPinned}
+                  aria-label={isPinned ? 'Unpin Study Pilot' : 'Pin Study Pilot'}
+                  aria-pressed={isPinned}
+                  onClick={() => setIsPinned(value => !value)}
                 >
-                  <Pin size={22} strokeWidth={1.8} />
+                  <Pin size={19} strokeWidth={1.9} />
                 </button>
                 <button
                   type="button"
-                  className="sp-top-icon"
-                  aria-label="Close StudyPilot"
-                  onClick={() => setIsOpen(false)}
+                  className="sp-icon-button"
+                  aria-label="More options"
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen(value => !value)}
                 >
-                  <MoreVertical size={25} strokeWidth={2.3} />
+                  <MoreVertical size={20} strokeWidth={2} />
                 </button>
               </div>
+
+              <AnimatePresence>
+                {menuOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      className="sp-menu-backdrop"
+                      aria-label="Close menu"
+                      onClick={() => setMenuOpen(false)}
+                    />
+                    <motion.div
+                      className="sp-menu"
+                      role="menu"
+                      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                      transition={{ duration: 0.14 }}
+                    >
+                      <MenuItem
+                        icon={<Camera size={16} />}
+                        label="Check image capture"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void captureSnapshot();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<BookmarkCheck size={16} />}
+                        label={isSaving ? 'Saving…' : 'Save to dashboard'}
+                        disabled={isSaving}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void saveToDashboard();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<ExternalLink size={16} />}
+                        label="Open dashboard"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          void openDashboard();
+                        }}
+                      />
+                      <MenuItem
+                        icon={<Minus size={16} />}
+                        label="Minimize"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setIsOpen(false);
+                        }}
+                      />
+                    </motion.div>
+                  </>
+                ) : null}
+              </AnimatePresence>
             </header>
 
-            <div className="sp-modal-body">
-              <StudyStage
-                view={view}
-                savedFolder={savedFolder}
-                isLivePaused={isLivePaused}
-              />
+            <motion.div
+              className="sp-body"
+              initial="hidden"
+              animate="show"
+              variants={{
+                hidden: {},
+                show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
+              }}
+            >
+              <motion.section className="sp-chat-switcher" variants={sectionReveal}>
+                <label className="sp-chat-select">
+                  <span>Shared chat</span>
+                  <select
+                    aria-label="Shared StudyPilot chat"
+                    value={activeChatId ?? ''}
+                    onChange={event => void selectDashboardChat(event.target.value || null)}
+                  >
+                    <option value="">New chat draft</option>
+                    {(sharedContext?.chats ?? []).map(chat => (
+                      <option key={chat.id} value={chat.id}>{chat.title}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="sp-chat-tool"
+                  aria-label="Create new chat"
+                  title="New chat"
+                  disabled={isCreatingChat}
+                  onClick={() => {
+                    void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
+                  }}
+                >
+                  <Plus size={16} />
+                </button>
+                <button
+                  type="button"
+                  className="sp-chat-tool"
+                  aria-label="Refresh shared chats"
+                  title="Refresh chats"
+                  disabled={isRefreshingChats}
+                  onClick={() => void refreshSharedChatContext(activeChatIdRef.current)}
+                >
+                  <RefreshCw size={15} data-spinning={isRefreshingChats} />
+                </button>
+              </motion.section>
 
-              <VoiceControls
-                view={view}
-                isMicOn={isMicOn}
-                isLivePaused={isLivePaused}
-                onMicToggle={() => setIsMicOn(value => !value)}
-                onListen={startLiveSharing}
-                onPause={() => setIsLivePaused(value => !value)}
-                onSettings={captureScreenshot}
-              />
+              <motion.section className="sp-stage" variants={sectionReveal} aria-live="polite">
+                <span className="sp-presence-dot" aria-hidden="true" />
+                <Orb state={orbState} />
+                <p className="sp-status" data-state={orbState}>
+                  {statusText}
+                </p>
+                <h2 className="sp-headline">Ask anything about this page</h2>
+              </motion.section>
 
-              <Composer
-                question={question}
-                onQuestionChange={setQuestion}
-                onSubmit={handleSubmit}
-              />
+              <motion.div className="sp-voice-dock" variants={sectionReveal}>
+                <RoundButton
+                  active={micOn && !paused}
+                  label={micOn ? 'Mute microphone' : 'Unmute microphone'}
+                  onClick={toggleMic}
+                >
+                  {micOn ? <Mic size={22} /> : <MicOff size={22} />}
+                </RoundButton>
+                <RoundButton
+                  active={isSpeaking}
+                  label={isSpeaking ? 'Stop reading aloud' : 'Read answer aloud'}
+                  onClick={speakAnswer}
+                >
+                  <Volume2 size={22} />
+                </RoundButton>
+                <RoundButton
+                  active={false}
+                  label={paused ? 'Resume session' : 'Pause session'}
+                  onClick={() => setPaused(value => !value)}
+                >
+                  {paused ? <Play size={22} /> : <Pause size={22} />}
+                </RoundButton>
+                <RoundButton
+                  active={settingsOpen}
+                  tinted
+                  label="Session settings"
+                  onClick={() => setSettingsOpen(value => !value)}
+                >
+                  <Settings size={22} />
+                </RoundButton>
+              </motion.div>
 
-              <QuickActions
-                isSaving={isSaving}
-                saveEnabled={context.saveToDashboard && !isSaving}
-                view={view}
-                onSummarize={() => runStudyAction('summarize')}
-                onExplain={() => runStudyAction('explain')}
-                onQuiz={() => runStudyAction('quiz')}
-                onFlashcards={() => runStudyAction('flashcards')}
-                onSave={sendToDashboard}
-                onRetake={captureScreenshot}
-                onStop={resetToIdle}
-              />
+              <AnimatePresence initial={false}>
+                {settingsOpen ? (
+                  <motion.div
+                    key="settings"
+                    className="sp-settings-wrap"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <SettingsSheet
+                      page={page}
+                      context={context}
+                      onChange={setContext}
+                      sessions={sharedContext?.sessions ?? []}
+                      activeSessionId={activeChat?.sessionId ?? null}
+                      onContinueSession={session => void continueDashboardSession(session)}
+                      onOpenDashboard={() => void openDashboard()}
+                    />
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
-              <AnswerPanel
-                view={view}
-                answer={answer}
-                title={lastQuestion}
-                savedFolder={savedFolder}
-                isSaving={isSaving}
-                onSave={sendToDashboard}
-                onOpenDashboard={openDashboard}
-              />
+              <motion.div className="sp-composer" variants={sectionReveal}>
+                <input
+                  type="text"
+                  value={question}
+                  placeholder="Ask a question or say something..."
+                  aria-label="Ask a question"
+                  disabled={isActiveChatSending || isCreatingChat}
+                  onChange={event => setQuestion(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleSubmit();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="sp-send"
+                  aria-label="Send question"
+                  onClick={handleSubmit}
+                  disabled={!question.trim() || isActiveChatSending || isCreatingChat}
+                >
+                  <Send size={17} strokeWidth={2} fill="currentColor" />
+                </button>
+              </motion.div>
 
-              <ContextRail
-                page={page}
-                context={context}
-                onChange={setContext}
-              />
-            </div>
+              <motion.div className="sp-chips" variants={sectionReveal}>
+                <QuickChip label="Summarize" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('summarize')}>
+                  <SummarizeGlyph />
+                </QuickChip>
+                <QuickChip label="Explain" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('explain')}>
+                  <ExplainGlyph />
+                </QuickChip>
+                <QuickChip label="Quiz Me" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('quiz')}>
+                  <QuizGlyph />
+                </QuickChip>
+                <QuickChip label="Flashcards" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('flashcards')}>
+                  <FlashcardsGlyph />
+                </QuickChip>
+              </motion.div>
+
+              {activeChat && chatMessages.length > 0 ? (
+                <motion.section className="sp-chat-history" variants={sectionReveal} aria-label="Shared chat history">
+                  <div className="sp-chat-history-head">
+                    <strong>{activeChat.title}</strong>
+                    <span>{chatMessages.length} messages</span>
+                  </div>
+                  <div className="sp-chat-history-list">
+                    {chatMessages.slice(-10).map(message => (
+                      <article key={message.id} data-role={message.role}>
+                        <span>{message.role === 'user' ? 'You' : 'Coach'}</span>
+                        <p>{message.text}</p>
+                      </article>
+                    ))}
+                  </div>
+                </motion.section>
+              ) : null}
+
+              <motion.section
+                className="sp-card"
+                variants={sectionReveal}
+                data-thinking={isActiveChatSending || phase === 'thinking'}
+              >
+                <button
+                  type="button"
+                  className="sp-card-head"
+                  aria-expanded={cardOpen}
+                  onClick={() => setCardOpen(value => !value)}
+                >
+                  <strong>{card.title}</strong>
+                  <span className="sp-card-time">Just now</span>
+                  <ChevronDown
+                    size={20}
+                    className="sp-card-chevron"
+                    data-open={cardOpen}
+                    aria-hidden="true"
+                  />
+                </button>
+
+                <AnimatePresence initial={false}>
+                  {cardOpen ? (
+                    <motion.div
+                      key="card-body"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <p className="sp-card-body">{card.body}</p>
+                      {cardScreenshotDataUrl ? (
+                        <figure className="sp-card-screenshot">
+                          <img
+                            src={cardScreenshotDataUrl}
+                            alt="Screenshot shared with StudyPilot"
+                          />
+                          <figcaption>
+                            <Camera size={13} />
+                            <span>Screenshot shared</span>
+                          </figcaption>
+                        </figure>
+                      ) : null}
+                      <div className="sp-card-actions">
+                        <button
+                          type="button"
+                          aria-label={isSpeaking ? 'Stop reading aloud' : 'Read aloud'}
+                          data-active={isSpeaking}
+                          onClick={speakAnswer}
+                        >
+                          <Volume2 size={19} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Copy answer"
+                          onClick={() => void copyAnswer()}
+                        >
+                          {copied ? <Check size={19} /> : <Copy size={19} />}
+                        </button>
+                        <span className="sp-card-spacer" />
+                        <button
+                          type="button"
+                          aria-label="Helpful"
+                          data-feedback="up"
+                          data-active={feedback === 'up'}
+                          onClick={() => setFeedback(value => (value === 'up' ? null : 'up'))}
+                        >
+                          <ThumbsUp size={19} />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Not helpful"
+                          data-feedback="down"
+                          data-active={feedback === 'down'}
+                          onClick={() => setFeedback(value => (value === 'down' ? null : 'down'))}
+                        >
+                          <ThumbsDown size={19} />
+                        </button>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+              </motion.section>
+            </motion.div>
 
             <footer className="sp-footer">
-              <button type="button" className="sp-pro-button">
-                <Crown size={17} />
+              <button
+                type="button"
+                className="sp-pro"
+                onClick={() => void openDashboard()}
+              >
+                <Crown size={16} />
                 <span>Pro</span>
               </button>
             </footer>
@@ -438,244 +1365,86 @@ export function FloatingStudyPilot() {
   );
 }
 
-function stopPageKeyboardShortcuts(event: KeyboardEvent): void {
-  event.stopPropagation();
-}
+const sectionReveal = {
+  hidden: { opacity: 0, y: 14 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const },
+  },
+};
 
-function StudyStage({
-  view,
-  savedFolder,
-  isLivePaused,
-}: {
-  view: StudyPilotView;
-  savedFolder: StudyFolder;
-  isLivePaused: boolean;
-}) {
-  const title = stageTitle(view, savedFolder, isLivePaused);
-  const subtitle = stageSubtitle(view);
-
+function Orb({ state }: { state: OrbState }) {
   return (
-    <section className="sp-stage" aria-live="polite">
-      <span className="sp-live-dot" aria-hidden="true" />
-
-      <div className="sp-energy-field">
-        <div className="sp-energy-ring" data-active={view}>
-          <span className="sp-ring-a" />
-          <span className="sp-ring-b" />
-          <span className="sp-ring-c" />
-          <span className="sp-wave-mark" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-            <i />
-            <i />
-          </span>
-        </div>
-      </div>
-
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={`${view}-${isLivePaused}`}
-          className="sp-stage-copy"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.16 }}
-        >
-          <h2>{title}</h2>
-          <p>{subtitle}</p>
-        </motion.div>
-      </AnimatePresence>
-    </section>
-  );
-}
-
-function VoiceControls({
-  view,
-  isMicOn,
-  isLivePaused,
-  onMicToggle,
-  onListen,
-  onPause,
-  onSettings,
-}: {
-  view: StudyPilotView;
-  isMicOn: boolean;
-  isLivePaused: boolean;
-  onMicToggle: () => void;
-  onListen: () => void;
-  onPause: () => void;
-  onSettings: () => void;
-}) {
-  return (
-    <div className="sp-voice-controls" aria-label="Live study controls">
-      <RoundButton
-        active={isMicOn}
-        label={isMicOn ? 'Mute microphone' : 'Use microphone'}
-        icon={<Mic size={27} />}
-        onClick={onMicToggle}
-      />
-      <RoundButton
-        label="Share screen for live help"
-        icon={<Volume2 size={27} />}
-        onClick={onListen}
-        active={view === 'live'}
-      />
-      <RoundButton
-        label={isLivePaused ? 'Resume sharing' : 'Pause sharing'}
-        icon={isLivePaused ? <Play size={27} /> : <Pause size={27} />}
-        onClick={onPause}
-        active={view === 'live' && !isLivePaused}
-      />
-      <RoundButton
-        label="Capture screenshot"
-        icon={<Settings size={27} />}
-        onClick={onSettings}
-      />
+    <div className="sp-orb" data-state={state} aria-hidden="true">
+      <span className="sp-orb-ripples" />
+      <span className="sp-orb-bloom sp-orb-bloom--violet" />
+      <span className="sp-orb-bloom sp-orb-bloom--blue" />
+      <span className="sp-orb-halo" />
+      <span className="sp-orb-ring" />
+      <span className="sp-orb-nebula" />
+      <span className="sp-orb-core" />
+      <span className="sp-orb-wave">
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </span>
     </div>
   );
 }
 
 function RoundButton({
-  active = false,
+  active,
+  tinted = false,
   label,
-  icon,
   onClick,
+  children,
 }: {
-  active?: boolean;
+  active: boolean;
+  tinted?: boolean;
   label: string;
-  icon: ReactNode;
   onClick: () => void;
+  children: ReactNode;
 }) {
   return (
     <button
       type="button"
-      className="sp-round-button"
+      className="sp-round"
       data-active={active}
+      data-tinted={tinted}
       aria-label={label}
       title={label}
       onClick={onClick}
     >
-      {icon}
+      {children}
     </button>
   );
 }
 
-function Composer({
-  question,
-  onQuestionChange,
-  onSubmit,
-}: {
-  question: string;
-  onQuestionChange: (value: string) => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <div className="sp-composer">
-      <textarea
-        value={question}
-        rows={1}
-        placeholder="Ask a question or say something..."
-        onChange={event => onQuestionChange(event.target.value)}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            onSubmit();
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="sp-send-button"
-        aria-label="Send question"
-        onClick={onSubmit}
-        disabled={!question.trim()}
-      >
-        <Send size={26} fill="currentColor" />
-      </button>
-    </div>
-  );
-}
-
-function QuickActions({
-  isSaving,
-  saveEnabled,
-  view,
-  onSummarize,
-  onExplain,
-  onQuiz,
-  onFlashcards,
-  onSave,
-  onRetake,
-  onStop,
-}: {
-  isSaving: boolean;
-  saveEnabled: boolean;
-  view: StudyPilotView;
-  onSummarize: () => void;
-  onExplain: () => void;
-  onQuiz: () => void;
-  onFlashcards: () => void;
-  onSave: () => void;
-  onRetake: () => void;
-  onStop: () => void;
-}) {
-  if (view === 'live') {
-    return (
-      <div className="sp-chip-row">
-        <ActionChip icon={<Square size={18} />} label="Stop sharing" onClick={onStop} danger />
-        <ActionChip icon={<Camera size={18} />} label="Send snapshot" onClick={onRetake} />
-        <ActionChip icon={<ExternalLink size={18} />} label="Save" onClick={onSave} disabled={!saveEnabled} />
-      </div>
-    );
-  }
-
-  if (view === 'screenshot') {
-    return (
-      <div className="sp-chip-row">
-        <ActionChip icon={<Lightbulb size={18} />} label="Explain" onClick={onExplain} />
-        <ActionChip icon={<BookOpen size={18} />} label="Summarize" onClick={onSummarize} />
-        <ActionChip icon={<RotateCcw size={18} />} label="Retake" onClick={onRetake} />
-        <ActionChip
-          icon={<ExternalLink size={18} />}
-          label={isSaving ? 'Saving' : 'Send'}
-          onClick={onSave}
-          disabled={!saveEnabled}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="sp-chip-row">
-      <ActionChip icon={<FileText size={18} />} label="Summarize" onClick={onSummarize} />
-      <ActionChip icon={<Lightbulb size={18} />} label="Explain" onClick={onExplain} />
-      <ActionChip icon={<HelpCircle size={18} />} label="Quiz Me" onClick={onQuiz} />
-      <ActionChip icon={<BookOpen size={18} />} label="Flashcards" onClick={onFlashcards} />
-    </div>
-  );
-}
-
-function ActionChip({
+function MenuItem({
   icon,
   label,
+  disabled,
   onClick,
-  disabled = false,
-  danger = false,
 }: {
   icon: ReactNode;
   label: string;
-  onClick: () => void;
   disabled?: boolean;
-  danger?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
-      className="sp-action-chip"
-      data-danger={danger}
-      onClick={onClick}
+      className="sp-menu-item"
+      role="menuitem"
       disabled={disabled}
+      onClick={onClick}
     >
       {icon}
       <span>{label}</span>
@@ -683,74 +1452,41 @@ function ActionChip({
   );
 }
 
-function AnswerPanel({
-  view,
-  answer,
-  title,
-  savedFolder,
-  isSaving,
-  onSave,
-  onOpenDashboard,
+function QuickChip({
+  label,
+  disabled,
+  onClick,
+  children,
 }: {
-  view: StudyPilotView;
-  answer: string;
-  title: string;
-  savedFolder: StudyFolder;
-  isSaving: boolean;
-  onSave: () => void;
-  onOpenDashboard: () => void;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
 }) {
-  const isSaved = view === 'saved';
-
   return (
-    <section className="sp-answer-card">
-      <div className="sp-answer-head">
-        <div>
-          <strong>
-            {isSaved ? `Saved to ${savedFolder}` : title}
-          </strong>
-          <span>{isSaved ? 'Ready in dashboard' : 'Just now'}</span>
-        </div>
-        <ChevronDown size={22} />
-      </div>
-
-      <p>{answer || 'Ask a question or choose an action to get an API answer.'}</p>
-
-      <div className="sp-answer-actions">
-        <button type="button" aria-label="Read answer aloud">
-          <Volume2 size={20} />
-        </button>
-        <button type="button" aria-label="Copy answer">
-          <Copy size={20} />
-        </button>
-        <span />
-        <button
-          type="button"
-          className="sp-save-inline"
-          onClick={isSaved ? onOpenDashboard : onSave}
-        >
-          {isSaved ? <ExternalLink size={20} /> : <CheckCircle2 size={20} />}
-          <span>{isSaved ? 'Open' : isSaving ? 'Saving' : 'Save'}</span>
-        </button>
-        <button type="button" aria-label="Helpful">
-          <ThumbsUp size={20} />
-        </button>
-        <button type="button" aria-label="Not helpful">
-          <ThumbsDown size={20} />
-        </button>
-      </div>
-    </section>
+    <button type="button" className="sp-chip" disabled={disabled} onClick={onClick}>
+      {children}
+      <span>{label}</span>
+    </button>
   );
 }
 
-function ContextRail({
+function SettingsSheet({
   page,
   context,
   onChange,
+  sessions,
+  activeSessionId,
+  onContinueSession,
+  onOpenDashboard,
 }: {
   page: PageContext;
   context: ContextShareSettings;
   onChange: Dispatch<SetStateAction<ContextShareSettings>>;
+  sessions: DashboardSessionSummary[];
+  activeSessionId: string | null;
+  onContinueSession: (session: DashboardSessionSummary) => void;
+  onOpenDashboard: () => void;
 }) {
   const setFlag =
     (
@@ -764,53 +1500,71 @@ function ContextRail({
     };
 
   return (
-    <section className="sp-context-rail">
-      <div className="sp-context-title">
-        <ShieldCheck size={15} />
+    <section className="sp-settings">
+      <div className="sp-settings-title">
+        <ShieldCheck size={14} />
         <span>Shared when you ask or save</span>
       </div>
-      <div className="sp-context-options">
+
+      <div className="sp-settings-toggles">
         <TogglePill
-          icon={<Camera size={14} />}
-          label="Screenshot"
+          label={context.screenshot ? 'Screenshot on' : 'No screenshot'}
           checked={context.screenshot}
           onChange={setFlag('screenshot')}
         />
         <TogglePill
-          icon={<ExternalLink size={14} />}
           label="Page URL"
           checked={context.pageUrl}
           onChange={setFlag('pageUrl')}
         />
         <TogglePill
-          icon={<Type size={14} />}
           label={page.selectedText ? 'Selected text' : 'No selection'}
           checked={context.selectedText}
           onChange={setFlag('selectedText')}
         />
         <TogglePill
-          icon={<CheckCircle2 size={14} />}
-          label="Save"
+          label="Auto-save"
           checked={context.saveToDashboard}
           onChange={setFlag('saveToDashboard')}
         />
       </div>
 
-      <label className="sp-folder-select">
-        <span>Folder</span>
+      <div className="sp-settings-row">
+        <label className="sp-folder">
+          <span>Folder</span>
+          <select
+            value={context.folder}
+            onChange={event =>
+              onChange(prev => ({
+                ...prev,
+                folder: event.target.value as StudyFolder,
+              }))
+            }
+          >
+            {STUDY_FOLDERS.map(folder => (
+              <option key={folder} value={folder}>
+                {folder}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="sp-dashboard-link" onClick={onOpenDashboard}>
+          <ExternalLink size={14} />
+          <span>Dashboard</span>
+        </button>
+      </div>
+      <label className="sp-session-select">
+        <span>Continue session</span>
         <select
-          value={context.folder}
-          onChange={event =>
-            onChange(prev => ({
-              ...prev,
-              folder: event.target.value as StudyFolder,
-            }))
-          }
+          value={activeSessionId ?? ''}
+          onChange={event => {
+            const session = sessions.find(item => item.id === event.target.value);
+            if (session) onContinueSession(session);
+          }}
         >
-          {STUDY_FOLDERS.map(folder => (
-            <option key={folder} value={folder}>
-              {folder}
-            </option>
+          <option value="">Choose a dashboard session</option>
+          {sessions.map(session => (
+            <option key={session.id} value={session.id}>{session.title}</option>
           ))}
         </select>
       </label>
@@ -819,95 +1573,168 @@ function ContextRail({
 }
 
 function TogglePill({
-  icon,
   label,
   checked,
   onChange,
 }: {
-  icon: ReactNode;
   label: string;
   checked: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
-    <label className="sp-toggle-pill" data-checked={checked}>
+    <label className="sp-toggle" data-checked={checked}>
       <input type="checkbox" checked={checked} onChange={onChange} />
-      {icon}
       <span>{label}</span>
     </label>
   );
 }
 
-function stageTitle(
-  view: StudyPilotView,
-  savedFolder: StudyFolder,
-  isLivePaused: boolean,
-): string {
-  switch (view) {
-    case 'screenshot':
-      return 'Screenshot ready';
-    case 'live':
-      return isLivePaused ? 'Paused' : 'Listening...';
-    case 'thinking':
-      return 'Reading your screen...';
-    case 'answer':
-      return 'Answer ready';
-    case 'saved':
-      return `Saved to ${savedFolder}`;
-    case 'idle':
-    default:
-      return 'Listening...';
-  }
+function SparkleLogo({ size = 28 }: { size?: number }) {
+  const gradientId = useId().replace(/[^a-zA-Z0-9]/g, '');
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 44 44"
+      fill="none"
+      aria-hidden="true"
+      className="sp-logo"
+    >
+      <defs>
+        <linearGradient
+          id={`sp-spark-${gradientId}`}
+          x1="8"
+          y1="4"
+          x2="38"
+          y2="40"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stopColor="#8fdcff" />
+          <stop offset="0.52" stopColor="#38a1ff" />
+          <stop offset="1" stopColor="#2e5bff" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M26.5 2.5c.78 10.5 5.22 14.94 15.72 15.72-10.5.78-14.94 5.22-15.72 15.72-.78-10.5-5.22-14.94-15.72-15.72C21.28 17.44 25.72 13 26.5 2.5Z"
+        fill={`url(#sp-spark-${gradientId})`}
+      />
+      <path
+        d="M11.5 28c.42 5.55 2.78 7.91 8.33 8.33-5.55.42-7.91 2.78-8.33 8.33-.42-5.55-2.78-7.91-8.33-8.33 5.55-.42 7.91-2.78 8.33-8.33Z"
+        fill={`url(#sp-spark-${gradientId})`}
+      />
+    </svg>
+  );
 }
 
-function stageSubtitle(view: StudyPilotView): string {
-  switch (view) {
-    case 'screenshot':
-      return 'Ask StudyPilot to explain, summarize, or save this snapshot.';
-    case 'live':
-      return 'StudyPilot can see your shared screen. Stop sharing anytime.';
-    case 'thinking':
-      return 'Checking the visible page before answering.';
-    case 'answer':
-      return 'Review the explanation, then save it to your dashboard.';
-    case 'saved':
-      return 'Your study session is ready for review.';
-    case 'idle':
-    default:
-      return 'Ask anything about this page';
-  }
+function SummarizeGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect width="18" height="18" rx="4.5" fill="#3d7dfd" />
+      <path
+        d="M5.4 5.6h7.2M5.4 8.6h7.2M5.4 11.6h4.6"
+        stroke="#eaf2ff"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
 }
 
-function promptForAction(action: StudyAction, question: string): string {
-  switch (action) {
-    case 'summarize':
-      return 'Summarize the page or screenshot in a concise study-friendly way. Focus on the main idea, key details, and anything worth reviewing.';
-    case 'quiz':
-      return 'Create a short quiz from the page or screenshot. Include 3 questions and the answers.';
-    case 'flashcards':
-      return 'Create 4 concise flashcards from the page or screenshot. Format each as Front and Back.';
-    case 'step-by-step':
-      return 'Explain the page or screenshot step by step for a student who is learning it for the first time.';
-    case 'explain':
-    default:
-      return question;
-  }
+function ExplainGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+      <path
+        d="M9 1.8a5.1 5.1 0 0 0-2.9 9.3c.6.44.9 1.02.9 1.65v.35h4v-.35c0-.63.3-1.21.9-1.65A5.1 5.1 0 0 0 9 1.8Z"
+        stroke="#fbbf24"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M7.2 15.4h3.6" stroke="#fbbf24" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
 }
 
-function buildQuestionContext(
-  page: PageContext,
-  context: ContextShareSettings,
-): string {
-  const lines: string[] = [];
+function QuizGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <circle cx="9" cy="9" r="9" fill="#1fbc84" />
+      <path
+        d="M6.9 6.9c.2-1.25 1.16-2 2.3-2 1.26 0 2.2.86 2.2 2 0 1.55-1.85 1.7-2.15 3"
+        stroke="#f2fff9"
+        strokeWidth="1.55"
+        fill="none"
+        strokeLinecap="round"
+      />
+      <circle cx="9.2" cy="12.9" r="0.95" fill="#f2fff9" />
+    </svg>
+  );
+}
 
-  if (context.pageUrl) {
-    lines.push(`Page title: ${page.sourceTitle}`);
-    lines.push(`Page URL: ${page.sourceUrl}`);
-  }
+function FlashcardsGlyph() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+      <rect width="18" height="18" rx="4.5" fill="#8b5cf6" />
+      <rect x="6.8" y="4.4" width="6.8" height="8.8" rx="1.4" fill="#efe9ff" opacity="0.55" />
+      <rect x="4.4" y="6" width="6.8" height="8.8" rx="1.4" fill="#f6f2ff" />
+    </svg>
+  );
+}
 
-  if (context.selectedText && page.selectedText) {
-    lines.push(`Selected text: ${page.selectedText}`);
-  }
+interface StudySessionInput {
+  id: string;
+  page: PageContext;
+  folder: StudyFolder;
+  question: string;
+  answer: string;
+  transcript?: StudyTranscriptTurn[];
+  screenshotDataUrl?: string;
+  screenshotUrl?: string;
+  tags?: string[];
+  remoteSessionId?: string;
+  createdAt?: string;
+}
 
-  return lines.join('\n');
+function createStudySession(input: StudySessionInput): StudySession {
+  const durationSeconds =
+    input.transcript && input.transcript.length > 0
+      ? Math.max(...input.transcript.map(turn => turn.atSeconds))
+      : 0;
+
+  return {
+    id: input.id,
+    title: input.page.sourceTitle || 'StudyPilot session',
+    sourceUrl: input.page.sourceUrl,
+    sourceTitle: input.page.sourceTitle || input.page.host,
+    screenshotUrl: input.screenshotUrl,
+    screenshotDataUrl: input.screenshotDataUrl,
+    question: input.question,
+    answer: input.answer,
+    transcript: input.transcript,
+    folder: input.folder,
+    mode: 'Study Coach',
+    durationSeconds,
+    remoteSessionId: input.remoteSessionId,
+    createdAt: input.createdAt ?? new Date().toISOString(),
+    tags: input.tags ?? ['screen-help', 'saved-explanation'],
+  };
+}
+
+function transcriptTurnFromMessage(
+  message: DashboardChatMessage,
+  index: number,
+): StudyTranscriptTurn {
+  return {
+    id: message.id,
+    role: message.role,
+    text: message.text,
+    atSeconds: Math.max(0, index),
+    sequence: message.sequence,
+    createdAt: message.createdAt,
+  };
+}
+
+function chatTitleFromPrompt(prompt: string, fallback: string): string {
+  const normalized = prompt.trim().replace(/\s+/g, ' ');
+  return (normalized || fallback || 'New chat').slice(0, 64);
 }
