@@ -122,5 +122,7 @@ export interface LiveTokenResult {
   expiresAt?: string;
   webSocketUrl?: string;
   tokenExpiresAt?: string;
+  accessToken?: string;
+  model?: string;
   message: string;
 }

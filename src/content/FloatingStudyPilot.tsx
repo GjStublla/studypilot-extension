@@ -44,6 +44,8 @@ import {
   type StudySession,
   type StudyTranscriptTurn,
 } from '@/shared/types';
+import { useVoiceSession } from '@/shared/useVoiceSession';
+import { VoiceSession } from './VoiceSession';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -187,6 +189,9 @@ export function FloatingStudyPilot({
   const [notice, setNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
 
+  // Live voice session
+  const voice = useVoiceSession();
+
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
   const [lastQuestion, setLastQuestion] = useState('');
@@ -268,11 +273,15 @@ export function FloatingStudyPilot({
 
   const orbState: OrbState = phase === 'thinking'
     ? 'thinking'
-    : paused
-      ? 'paused'
-      : micOn
+    : voice.status === 'speaking'
+      ? 'listening'  // orb pulses when AI speaks
+      : voice.status === 'listening'
         ? 'listening'
-        : 'muted';
+        : paused
+          ? 'paused'
+          : micOn
+            ? 'listening'
+            : 'muted';
 
   const statusText = notice
     ? notice
@@ -551,39 +560,103 @@ export function FloatingStudyPilot({
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  function toggleMic() {
-    setMicOn(value => {
-      const next = !value;
-      if (next) {
-        setPaused(false);
-        void requestLiveAccess();
+  // ── Live voice session controls ──────────────────────────────────────────────
+
+  // Sync voice transcript turns into the main session transcript when the
+  // voice session ends or produces new turns, so they can be saved to dashboard.
+  useEffect(() => {
+    if (voice.transcript.length > 0) {
+      setTranscript(voice.transcript);
+    }
+  }, [voice.transcript]);
+
+  // Reflect voice status in the panel orb state / mic button
+  useEffect(() => {
+    const isVoiceActive =
+      voice.status === 'connecting' ||
+      voice.status === 'listening' ||
+      voice.status === 'speaking';
+    setMicOn(isVoiceActive);
+
+    if (voice.status === 'error' && voice.errorMessage) {
+      flashNotice(voice.errorMessage, 4000);
+    }
+
+    // Auto-save when a voice session ends cleanly with transcript content
+    if (
+      (voice.status === 'ended' || (!isVoiceActive && voice.transcript.length > 0)) &&
+      voice.transcript.length > 0 &&
+      context.saveToDashboard
+    ) {
+      flashNotice('Voice session ended', 2200);
+      const userTurns = voice.transcript.filter(t => t.role === 'user');
+      const aiTurns   = voice.transcript.filter(t => t.role === 'ai');
+      if (userTurns.length > 0 && aiTurns.length > 0) {
+        void persistSessionToDashboard({
+          questionText: userTurns[0].text,
+          answerText: aiTurns[aiTurns.length - 1].text,
+          transcriptSnapshot: voice.transcript,
+          successNotice: 'Voice session saved',
+        });
       }
-      return next;
-    });
+    } else if (voice.status === 'ended') {
+      flashNotice('Voice session ended', 2200);
+    }
+  }, [voice.status, voice.errorMessage]);
+
+  function toggleMic() {
+    const isVoiceActive =
+      voice.status === 'connecting' ||
+      voice.status === 'listening' ||
+      voice.status === 'speaking';
+
+    if (isVoiceActive) {
+      // Stop the active session
+      voice.stop();
+      setMicOn(false);
+    } else {
+      // Start a new live voice session
+      setPaused(false);
+      void startLiveVoiceSession();
+    }
   }
 
-  async function requestLiveAccess() {
+  async function startLiveVoiceSession() {
     try {
-      const response = await sendRuntimeMessage<LiveTokenResult>({
+      const tokenResult = await sendRuntimeMessage<LiveTokenResult>({
         type: 'STUDYPILOT_GET_LIVE_TOKEN',
       });
 
-      if (!response) {
-        setMicOn(false);
-        flashNotice('Open the extension build for live coach');
+      if (!tokenResult) {
+        flashNotice('Open the built extension to use live voice coach');
         return;
       }
 
-      if (response.status === 'stub' || response.status === 'fallback') {
-        setMicOn(false);
+      if (tokenResult.status !== 'ready') {
+        flashNotice(tokenResult.message, 4000);
+        return;
       }
 
-      flashNotice(response.message, 3600);
+      // Build a brief system context string from the current page
+      const systemContext = [
+        `Page title: ${page.sourceTitle || 'unknown'}`,
+        `URL: ${context.pageUrl ? page.sourceUrl : 'not shared'}`,
+        page.selectedText && context.selectedText
+          ? `Selected text: ${page.selectedText.slice(0, 300)}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      await voice.start(tokenResult, systemContext);
       await refreshAuthState();
     } catch (error) {
       setMicOn(false);
       const message = error instanceof Error ? error.message : 'Live coach unavailable';
-      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+      flashNotice(
+        message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable',
+        3200,
+      );
     }
   }
 
@@ -756,6 +829,38 @@ export function FloatingStudyPilot({
                   <Settings size={22} />
                 </RoundButton>
               </motion.div>
+
+              {/* Live voice session overlay — shown when mic is active */}
+              <VoiceSession
+                status={voice.status}
+                transcript={voice.transcript}
+                partialModelText={voice.partialModelText}
+                errorMessage={voice.errorMessage}
+                micLevel={voice.micLevel}
+                speakerLevel={voice.speakerLevel}
+                isMuted={voice.isMuted}
+                onMuteToggle={() => {
+                  if (voice.isMuted) voice.unmute();
+                  else voice.mute();
+                }}
+                onStop={() => {
+                  // Save before stopping if there's transcript content
+                  if (voice.transcript.length > 0 && context.saveToDashboard) {
+                    const userTurns = voice.transcript.filter(t => t.role === 'user');
+                    const aiTurns   = voice.transcript.filter(t => t.role === 'ai');
+                    if (userTurns.length > 0 && aiTurns.length > 0) {
+                      void persistSessionToDashboard({
+                        questionText: userTurns[0].text,
+                        answerText: aiTurns[aiTurns.length - 1].text,
+                        transcriptSnapshot: voice.transcript,
+                        successNotice: 'Voice session saved',
+                      });
+                    }
+                  }
+                  voice.stop();
+                  setMicOn(false);
+                }}
+              />
 
               <AnimatePresence initial={false}>
                 {settingsOpen ? (

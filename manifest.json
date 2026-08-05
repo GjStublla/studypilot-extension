@@ -22,6 +22,7 @@
   "permissions": ["activeTab", "storage"],
   "host_permissions": [
     "https://*.supabase.co/*",
+    "wss://*.supabase.co/*",
     "https://studypilot.app/*",
     "https://*.studypilot.ai/*"
   ],

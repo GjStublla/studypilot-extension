@@ -443,43 +443,41 @@ export async function getAuthStatus(): Promise<ExtensionAuthState> {
 }
 
 export async function requestLiveToken(sessionId?: string): Promise<LiveTokenResult> {
-  const response = await edgeFetch('live-token', { sessionId });
-  if (!response.ok) throw await responseError(response);
+  // Build the WSS proxy URL directly — no HTTP preflight needed.
+  // The JWT is already available from the authenticated session.
+  // The edge function handles auth via ?jwt= query param on the WS upgrade.
+  const session = await ensureAuthenticatedSession();
+  const wssBase = SUPABASE_URL
+    .replace(/\/$/, '')
+    .replace(/^https:\/\//, 'wss://')
+    .replace(/^http:\/\//, 'ws://')
+  const webSocketUrl = `${wssBase}/functions/v1/live-token?jwt=${encodeURIComponent(session.accessToken)}`
 
-  const data = await response.json();
-
-  if (data?.mode === 'text_fallback') {
-    return {
-      status: 'fallback',
-      message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
-    };
+  // Also fetch model info from the function (lightweight HTTP call)
+  let model: string | undefined
+  try {
+    const response = await edgeFetch('live-token', { sessionId });
+    if (response.ok) {
+      const data = await response.json();
+      if (data?.mode === 'text_fallback') {
+        return {
+          status: 'fallback',
+          message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
+        };
+      }
+      if (typeof data?.model === 'string') model = data.model;
+    }
+  } catch {
+    // Non-fatal — we still have the WSS URL
   }
 
-  if (data?.mode === 'proxy_required') {
-    return {
-      status: 'proxy_required',
-      message: typeof data.reason === 'string' ? data.reason : 'Live coaching requires a backend WebSocket proxy.',
-    };
-  }
-
-  if (typeof data?.accessToken === 'string' && typeof data?.webSocketUrl === 'string') {
-    return {
-      status: 'ready',
-      webSocketUrl: data.webSocketUrl,
-      tokenExpiresAt: data.expiresAt,
-      message: 'Live token ready.',
-    };
-  }
-
-  if (typeof data?.ephemeralToken === 'string') {
-    return {
-      status: 'stub',
-      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
-      message: 'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
-    };
-  }
-
-  throw new Error('Unexpected live-token response from StudyPilot.');
+  return {
+    status: 'ready',
+    webSocketUrl,
+    accessToken: session.accessToken,
+    model,
+    message: 'Live token ready.',
+  };
 }
 
 export async function requestCoaching(
@@ -490,6 +488,16 @@ export async function requestCoaching(
     userMessage: buildCoachingMessage(request),
     history: request.history ?? [],
     images: request.images ?? [],
+    clientContext: {
+      page: {
+        title: request.page.sourceTitle || undefined,
+        url: request.context.pageUrl ? request.page.sourceUrl : undefined,
+      },
+      action: request.action,
+      selection: request.context.selectedText ? request.page.selectedText : undefined,
+      screenshotShared: request.context.screenshot,
+    },
+    originSurface: 'extension',
   });
 
   if (!response.ok) throw await responseError(response);
