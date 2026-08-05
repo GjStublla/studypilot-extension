@@ -19,7 +19,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "microphone"],
   "host_permissions": [
     "https://*.supabase.co/*",
     "https://studypilot.app/*",

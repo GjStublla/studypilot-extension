@@ -35,6 +35,7 @@ class ExtensionAuthRequiredError extends Error {
 
 interface AuthenticatedSession {
   accessToken: string;
+  refreshToken?: string;
   userId: string;
   email?: string | null;
   expiresAt?: number;
@@ -117,17 +118,24 @@ async function readStoredSession(): Promise<ExtensionAuthSession | null> {
   const legacyStored = await storageGet<ExtensionAuthSession>(LEGACY_STORAGE_KEY);
   if (!legacyStored?.access_token) return null;
 
+  // Migrate legacy session to the current storage key.
+  // Wrap normalizeSession in try/catch — an expired legacy token should be
+  // silently discarded rather than throwing during the migration path.
   await storageRemove(LEGACY_STORAGE_KEY);
-  const normalized = normalizeSession(legacyStored);
-  const nextSession: ExtensionAuthSession = {
-    access_token: normalized.accessToken,
-    user_id: normalized.userId,
-    email: normalized.email,
-    expires_at: normalized.expiresAt,
-  };
-
-  await writeStoredSession(nextSession);
-  return nextSession;
+  try {
+    const normalized = normalizeSession(legacyStored);
+    const nextSession: ExtensionAuthSession = {
+      access_token: normalized.accessToken,
+      user_id: normalized.userId,
+      email: normalized.email,
+      expires_at: normalized.expiresAt,
+    };
+    await writeStoredSession(nextSession);
+    return nextSession;
+  } catch {
+    // Legacy token is expired — don't migrate it, treat as no session.
+    return null;
+  }
 }
 
 async function writeStoredSession(session: ExtensionAuthSession): Promise<void> {
@@ -164,15 +172,94 @@ async function ensureAuthenticatedSession(): Promise<AuthenticatedSession> {
       }
       await storageRemove(STORAGE_KEY);
       await storageRemove(LEGACY_STORAGE_KEY);
-    } catch (error) {
+    } catch (err) {
+      // Token expired — attempt a silent refresh via Supabase before giving up.
+      if (stored.access_token && !LOCAL_DEV_MODE) {
+        const refreshed = await attemptTokenRefresh(stored);
+        if (refreshed) return refreshed;
+      }
       await storageRemove(STORAGE_KEY);
       await storageRemove(LEGACY_STORAGE_KEY);
-      if (!LOCAL_DEV_MODE) throw error;
+      if (!LOCAL_DEV_MODE) throw err;
     }
   }
 
   if (LOCAL_DEV_MODE) return ensureLocalDevSession();
   throw new ExtensionAuthRequiredError();
+}
+
+/**
+ * Attempt a silent token refresh using the stored refresh token.
+ * Falls back to a clock-skew validation if no refresh token is available.
+ * Returns a new valid session, or null if the token is genuinely expired.
+ */
+async function attemptTokenRefresh(stored: ExtensionAuthSession): Promise<AuthenticatedSession | null> {
+  // Prefer a real refresh if we have a refresh token.
+  if (stored.refresh_token) {
+    try {
+      const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ refresh_token: stored.refresh_token }),
+      });
+
+      if (response.ok) {
+        const data = await response.json() as {
+          access_token?: string;
+          refresh_token?: string;
+          expires_at?: number;
+          expires_in?: number;
+          user?: { id?: string; email?: string | null };
+        };
+
+        if (data.access_token && data.user?.id) {
+          const renewed: ExtensionAuthSession = {
+            access_token: data.access_token,
+            refresh_token: data.refresh_token ?? stored.refresh_token,
+            user_id: data.user.id,
+            email: data.user.email ?? stored.email,
+            expires_at:
+              data.expires_at ??
+              (typeof data.expires_in === 'number'
+                ? Math.floor(Date.now() / 1000) + data.expires_in
+                : undefined),
+          };
+          await writeStoredSession(renewed);
+          return normalizeSession(renewed);
+        }
+      }
+    } catch {
+      // Network error — fall through to clock-skew check.
+    }
+  }
+
+  // No refresh token or refresh failed — check if the token is still accepted
+  // by Supabase (handles clock skew between the extension and server).
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${stored.access_token}`,
+      },
+    });
+
+    if (response.ok) {
+      // Token still valid — extend local expiry by 5 minutes.
+      const extended: ExtensionAuthSession = {
+        ...stored,
+        expires_at: Math.floor(Date.now() / 1000) + 300,
+      };
+      await writeStoredSession(extended);
+      return normalizeSession(extended);
+    }
+  } catch {
+    // Network error.
+  }
+
+  return null;
 }
 
 async function validateLocalAccessToken(accessToken: string): Promise<boolean> {
@@ -324,6 +411,7 @@ function normalizeSession(session: ExtensionAuthSession): AuthenticatedSession {
 
   return {
     accessToken: session.access_token,
+    refreshToken: session.refresh_token,
     userId,
     email: session.email ?? payload?.email ?? null,
     expiresAt,
@@ -406,6 +494,7 @@ export async function storeExtensionSession(
 
   await writeStoredSession({
     access_token: normalized.accessToken,
+    refresh_token: session.refresh_token, // preserve refresh token for silent renewal
     user_id: normalized.userId,
     email: normalized.email,
     expires_at: normalized.expiresAt,
@@ -652,7 +741,7 @@ function buildCoachingMessage(request: CoachingRequest): string {
     : 'The student did not share a screenshot.';
   const pageUrl = request.context.pageUrl ? request.page.sourceUrl : 'not shared';
 
-  return [
+  const parts = [
     'StudyPilot extension request.',
     `Action: ${labelForAction(request.action)}.`,
     `Page title: ${request.page.sourceTitle || 'unknown'}.`,
@@ -661,7 +750,14 @@ function buildCoachingMessage(request: CoachingRequest): string {
     screenshotNote,
     'Academic-integrity rule: coach the student with explanations, questions, study strategies, and revision guidance. Do not write final submission-ready assignment content.',
     `Student request: ${request.question?.trim() || defaultPromptForAction(request.action)}.`,
-  ].join('\n');
+  ];
+
+  // Include the extracted page text so the AI can actually read what the student sees.
+  if (request.page.pageText) {
+    parts.push(`\nPAGE CONTENT (first ~6000 chars):\n${request.page.pageText}`);
+  }
+
+  return parts.join('\n');
 }
 
 function buildSessionMessages(remoteSessionId: string, session: StudySession) {

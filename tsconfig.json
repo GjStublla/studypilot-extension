@@ -17,10 +17,12 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["chrome", "vite/client"],
     "baseUrl": ".",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["src/*"]
     }
   },
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.spec.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

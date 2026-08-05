@@ -36,7 +36,6 @@ import {
   type DashboardSaveResult,
   type ExtensionAuthSession,
   type ExtensionAuthState,
-  type LiveTokenResult,
   type PageContext,
   type StudyAction,
   type StudyFolder,
@@ -64,6 +63,7 @@ interface SaveSessionOptions {
 type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
 
 const ACCESS_KEY = 'sp_access_token';
+const REFRESH_KEY = 'sp_refresh_token';
 const USER_ID_KEY = 'sp_user_id';
 const EMAIL_KEY = 'sp_email';
 const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
@@ -71,11 +71,25 @@ const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
 
+  // Extract readable page text for richer AI context.
+  // Strips excess whitespace and caps at 6000 chars to stay within token limits.
+  let pageText: string | undefined;
+  try {
+    const bodyText = document.body?.innerText ?? '';
+    const cleaned = bodyText.replace(/\s{3,}/g, '\n\n').trim();
+    if (cleaned.length > 80) {
+      pageText = cleaned.length > 6000 ? `${cleaned.slice(0, 6000)}…` : cleaned;
+    }
+  } catch {
+    // DOM access can fail in sandboxed iframes — not fatal.
+  }
+
   return {
     sourceUrl: window.location.href,
     sourceTitle: document.title || window.location.hostname || 'Current page',
     host: window.location.hostname.replace(/^www\./, ''),
     selectedText: selectedText ? selectedText.slice(0, 280) : undefined,
+    pageText,
   };
 }
 
@@ -103,6 +117,7 @@ function readDashboardAuthSession(): ExtensionAuthSession | null {
     if (accessToken) {
       return {
         access_token: accessToken,
+        refresh_token: window.localStorage.getItem(REFRESH_KEY) ?? undefined,
         user_id: window.localStorage.getItem(USER_ID_KEY) ?? undefined,
         email: window.localStorage.getItem(EMAIL_KEY),
       };
@@ -150,6 +165,7 @@ function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
   const user = isObject(sessionValue.user) ? sessionValue.user : null;
   return {
     access_token: sessionValue.access_token,
+    refresh_token: typeof sessionValue.refresh_token === 'string' ? sessionValue.refresh_token : undefined,
     user_id: typeof user?.id === 'string' ? user.id : undefined,
     email: typeof user?.email === 'string' ? user.email : null,
     expires_at: typeof sessionValue.expires_at === 'number' ? sessionValue.expires_at : undefined,
@@ -192,7 +208,7 @@ export function FloatingStudyPilot({
   const [lastQuestion, setLastQuestion] = useState('');
   const [card, setCard] = useState<AnswerCard>({
     title: 'Ready to coach',
-    body: 'Ask about the page, summarize the material, or save a coaching session once the extension is connected to your StudyPilot account.',
+    body: 'Ask about this page, summarize it, or save a session once the extension is connected.',
   });
   const [cardOpen, setCardOpen] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -213,6 +229,16 @@ export function FloatingStudyPilot({
 
   const noticeTimer = useRef<number | undefined>(undefined);
   const sessionStartedAt = useRef(Date.now());
+
+  useEffect(() => {
+    // Preload available voices so getBestVoice() has them ready.
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.addEventListener('voiceschanged', () => {
+        window.speechSynthesis.getVoices(); // triggers caching
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const refreshSelection = () => setPage(getPageContext());
@@ -245,6 +271,24 @@ export function FloatingStudyPilot({
   }, []);
 
   useEffect(() => {
+    if (!isDashboardBridgeOrigin()) return;
+
+    const syncSession = () => {
+      void bridgeDashboardSession();
+    };
+
+    window.addEventListener('focus', syncSession);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncSession();
+    });
+
+    return () => {
+      window.removeEventListener('focus', syncSession);
+      document.removeEventListener('visibilitychange', syncSession);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isOpen) void refreshAuthState();
   }, [isOpen]);
 
@@ -263,6 +307,7 @@ export function FloatingStudyPilot({
     return () => {
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      recognitionRef.current?.stop();
     };
   }, []);
 
@@ -277,7 +322,7 @@ export function FloatingStudyPilot({
   const statusText = notice
     ? notice
     : authState?.connected === false
-      ? 'Connect dashboard'
+      ? 'Connect in the web app'
     : phase === 'thinking'
       ? 'Thinking...'
       : paused
@@ -333,7 +378,7 @@ export function FloatingStudyPilot({
     }
   }
 
-  async function runStudyAction(action: StudyAction, customQuestion?: string) {
+  async function runStudyAction(action: StudyAction, customQuestion?: string, autoSpeak = false) {
     const prompt = customQuestion?.trim();
     const studentText = prompt || defaultPromptForAction(action);
     const priorTranscript = transcript;
@@ -398,6 +443,16 @@ export function FloatingStudyPilot({
       setCardOpen(true);
       setPhase('answer');
       flashNotice('Coach response ready');
+      if (autoSpeak) {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const utterance = makeSpeechUtterance(responseText);
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => setIsSpeaking(false);
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        }
+      }
       await refreshAuthState();
       if (context.saveToDashboard) {
         void persistSessionToDashboard({
@@ -525,8 +580,7 @@ export function FloatingStudyPilot({
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(card.body);
-    utterance.rate = 1.02;
+    const utterance = makeSpeechUtterance(card.body);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.cancel();
@@ -551,39 +605,65 @@ export function FloatingStudyPilot({
     window.setTimeout(() => setCopied(false), 1600);
   }
 
+  // Web Speech API recognition instance — kept in a ref so start/stop
+  // work across renders without creating multiple instances.
+  const recognitionRef = useRef<any>(null);
+
   function toggleMic() {
-    setMicOn(value => {
-      const next = !value;
-      if (next) {
-        setPaused(false);
-        void requestLiveAccess();
-      }
-      return next;
-    });
-  }
-
-  async function requestLiveAccess() {
-    try {
-      const response = await sendRuntimeMessage<LiveTokenResult>({
-        type: 'STUDYPILOT_GET_LIVE_TOKEN',
-      });
-
-      if (!response) {
-        setMicOn(false);
-        flashNotice('Open the extension build for live coach');
-        return;
-      }
-
-      if (response.status === 'stub' || response.status === 'fallback') {
-        setMicOn(false);
-      }
-
-      flashNotice(response.message, 3600);
-      await refreshAuthState();
-    } catch (error) {
+    if (micOn) {
+      // Stop listening
+      recognitionRef.current?.stop();
       setMicOn(false);
-      const message = error instanceof Error ? error.message : 'Live coach unavailable';
-      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      flashNotice('Voice input is not supported in this browser.', 3000);
+      return;
+    }
+
+    const recognition: any = new SpeechRecognition();
+    recognition.continuous = false;      // stop after first utterance
+    recognition.interimResults = false;  // only final results
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setMicOn(true);
+      setPaused(false);
+      flashNotice('Listening…', 8000);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setMicOn(false);
+        flashNotice(`"${transcript.slice(0, 40)}${transcript.length > 40 ? '…' : ''}"`, 2000);
+        void runStudyAction('explain', transcript, true);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      setMicOn(false);
+      if (event.error === 'not-allowed') {
+        flashNotice('Microphone access denied. Allow it in Chrome settings.', 4000);
+      } else if (event.error !== 'no-speech') {
+        flashNotice('Voice input failed. Try again.', 3000);
+      }
+    };
+
+    recognition.onend = () => {
+      setMicOn(false);
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      flashNotice('Could not start voice input. Try again.', 3000);
+      setMicOn(false);
     }
   }
 
@@ -716,7 +796,15 @@ export function FloatingStudyPilot({
                 show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
               }}
             >
-              <motion.section className="sp-stage" variants={sectionReveal} aria-live="polite">
+              {/* Show a web-app connect prompt when no session is available */}
+              {authState?.connected === false ? (
+                <WebAppConnectView onOpenDashboard={() => void openDashboard()} />
+              ) : (
+              <><motion.section
+                  className="sp-stage"
+                  variants={sectionReveal}
+                  aria-live="polite"
+                >
                 <span className="sp-presence-dot" aria-hidden="true" />
                 <Orb state={orbState} />
                 <p className="sp-status" data-state={orbState}>
@@ -900,8 +988,11 @@ export function FloatingStudyPilot({
                   ) : null}
                 </AnimatePresence>
               </motion.section>
-            </motion.div>
-
+              </>
+            )}  
+            </motion.div>{/* end sp-body */}
+ 
+          
             <footer className="sp-footer">
               <button
                 type="button"
@@ -1239,6 +1330,33 @@ function createStudySession(input: StudySessionInput): StudySession {
   };
 }
 
+/**
+ * Pick the best available speech synthesis voice.
+ * Prefers Google's neural voices, then falls back to any English voice.
+ */
+function getBestVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  const googleNeural = voices.find(v =>
+    v.name.includes('Google') && v.lang.startsWith('en')
+  );
+  if (googleNeural) return googleNeural;
+
+  const english = voices.find(v => v.lang.startsWith('en-US'));
+  return english ?? voices[0] ?? null;
+}
+
+function makeSpeechUtterance(text: string): SpeechSynthesisUtterance {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.05;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+  const voice = getBestVoice();
+  if (voice) utterance.voice = voice;
+  return utterance;
+}
+
 function fallbackTranscript(question: string, answer: string): StudyTranscriptTurn[] {
   const turns: StudyTranscriptTurn[] = [
     { role: 'user', text: question, atSeconds: 0 },
@@ -1246,4 +1364,33 @@ function fallbackTranscript(question: string, answer: string): StudyTranscriptTu
   ];
 
   return turns.filter(turn => turn.text.trim().length > 0);
+}
+
+/* ============================================================================
+   WebAppConnectView — shown when the extension has no stored session.
+   Directs users to the StudyPilot web app, where the extension can connect
+   automatically once the browser session is available.
+   ============================================================================ */
+
+function WebAppConnectView({
+  onOpenDashboard,
+}: {
+  onOpenDashboard: () => void;
+}) {
+  return (
+    <div className="sp-login">
+      <div className="sp-login-brand">
+        <SparkleLogo size={28} />
+        <span>Connect StudyPilot</span>
+      </div>
+      <div className="sp-login-form">
+        <p className="sp-login-error" style={{ margin: 0 }}>
+          Open the StudyPilot web app, sign in, and this extension will connect automatically.
+        </p>
+        <button type="button" className="sp-login-btn" onClick={onOpenDashboard}>
+          Open web app
+        </button>
+      </div>
+    </div>
+  );
 }

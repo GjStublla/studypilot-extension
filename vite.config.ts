@@ -30,10 +30,10 @@ export default defineConfig(({ mode }) => {
 
   if (
     mode === 'production' &&
-    (isLoopbackUrl(env.VITE_SUPABASE_URL) || isLoopbackUrl(env.VITE_DASHBOARD_URL))
+    isLoopbackUrl(env.VITE_SUPABASE_URL)
   ) {
     throw new Error(
-      'Production extension builds cannot target localhost. Use npm run build:local instead.',
+      'Production extension builds cannot target a local Supabase instance. Use npm run build:local instead.',
     );
   }
 
@@ -52,7 +52,16 @@ export default defineConfig(({ mode }) => {
           'http://localhost/*',
         ],
       }
-    : manifest;
+    : isLoopbackUrl(env.VITE_DASHBOARD_URL)
+      ? {
+          ...manifest,
+          host_permissions: [
+            ...manifest.host_permissions,
+            'http://127.0.0.1/*',
+            'http://localhost/*',
+          ],
+        }
+      : manifest;
 
   return {
     plugins: [react(), crx({ manifest: buildManifest })],

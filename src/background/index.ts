@@ -23,7 +23,7 @@ const CAPTURE_MAX_EDGE = 1024;
 const CAPTURE_JPEG_QUALITY = 0.72;
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.info('[StudyPilot] Installed. Click the toolbar icon to toggle the panel on any http/https page.');
+  chrome.action.setTitle({ title: 'Toggle Study Pilot' }).catch(() => undefined);
 });
 
 // The toolbar icon is the single entry point: it toggles the on-page panel.

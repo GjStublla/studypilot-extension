@@ -1066,3 +1066,95 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ------------------------------------------------------------------- login view */
+
+.sp-login {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 32px 24px 28px;
+  flex: 1;
+}
+
+.sp-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sp-ink);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+}
+
+.sp-login-form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sp-login-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--sp-line-strong);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--sp-ink);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 160ms ease, background 160ms ease;
+  box-sizing: border-box;
+}
+
+.sp-login-input::placeholder {
+  color: var(--sp-muted-2);
+}
+
+.sp-login-input:focus {
+  border-color: rgba(124, 92, 255, 0.55);
+  background: rgba(124, 92, 255, 0.06);
+}
+
+.sp-login-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sp-login-error {
+  margin: 0;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 79, 100, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 79, 100, 0.07);
+  color: #ff7080;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.sp-login-btn {
+  height: 44px;
+  border: none;
+  border-radius: 999px;
+  background: #f6f7fc;
+  color: #07080f;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 160ms ease, transform 120ms ease;
+  margin-top: 4px;
+}
+
+.sp-login-btn:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.sp-login-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
