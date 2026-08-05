@@ -1,0 +1,9 @@
+Four exports:
+analyzeScreenshot(dataUrl, question, onChunk) — takes whatever chrome.tabs.captureVisibleTab() returns, sends it to Gemini Vision, streams the answer. The question param is optional; if omitted it asks Gemini to just summarise what's on screen.
+startLiveReading(stream, onChunk) — takes a MediaStream from getDisplayMedia(), captures a JPEG frame every 3 seconds, and streams narration back. Returns a { stop() } handle. Gemini is instructed to return "UNCHANGED" when nothing new is happening — those frames get swallowed so your UI stays clean.
+askQuestion(question, onChunk, context?) — pure text Q&A for follow-up questions after a screenshot, or when the user just types something. The optional context string lets you pass in page content or prior conversation.
+handleGeminiBackgroundRequest(request, onChunk) — background-script-safe dispatcher. If you hit CORS issues calling Gemini from the content script, route messages through background/index.ts and call this there. The comment block inside the file shows exactly how to wire the chrome.runtime.onMessage listener.
+A few things to note:
+The captureFrameFromStream function uses a hidden <video> element for frame extraction because ImageCapture isn't reliably available in extension contexts. It works, but the first frame of a new stream may be blank — you might want to add a 500ms delay before the first processFrame() call if you see that.
+The JPEG quality is set to 0.7 and frames are capped at the track's native resolution — you can tune CANVAS_QUALITY and LIVE_FRAME_INTERVAL_MS at the top of the file if you want to trade cost for responsiveness.
+The model is gemini-1.5-flash throughout — fast and cheap enough for real-time use. Swap to gemini-1.5-pro in VISION_MODEL if you need heavier reasoning on screenshots.
