@@ -1385,45 +1385,83 @@ const sectionReveal = {
 
 function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
   const [index, setIndex] = useState(0);
-  const [flipped, setFlipped] = useState(false);
+  const [side, setSide] = useState<'q' | 'a'>('q');
+  const [dir, setDir] = useState(0); // +1 forward, -1 back, 0 flip
 
   function go(delta: number) {
-    setIndex(i => {
-      const next = (i + delta + items.length) % items.length;
-      return next;
-    });
-    setFlipped(false);
+    setDir(delta);
+    setIndex(i => (i + delta + items.length) % items.length);
+    setSide('q');
+  }
+
+  function flip() {
+    setDir(0);
+    setSide(s => s === 'q' ? 'a' : 'q');
+  }
+
+  // Keyboard: Space/Enter = flip, ArrowLeft/Right = navigate
+  function handleKey(e: React.KeyboardEvent) {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
+    else if (e.key === 'ArrowLeft')  { e.preventDefault(); go(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
   }
 
   const card = items[index];
   if (!card) return null;
+  const isAnswer = side === 'a';
+  const pct = Math.round(((index + 1) / items.length) * 100);
 
   return (
     <div className="sp-fc-wrap">
-      <p className="sp-fc-counter">{index + 1} / {items.length}</p>
 
-      <button
-        type="button"
+      {/* progress + counter */}
+      <div className="sp-fc-header">
+        <span className="sp-fc-counter">{index + 1} / {items.length}</span>
+        <span className="sp-fc-pct">{pct}%</span>
+      </div>
+      <div className="sp-fc-progress">
+        <div className="sp-fc-progress-bar" style={{ width: `${pct}%` }} />
+      </div>
+
+      {/* card */}
+      <div
         className="sp-fc-card"
-        data-flipped={flipped}
-        aria-label={flipped ? 'Showing answer — click to see question' : 'Showing question — click to reveal answer'}
-        onClick={() => setFlipped(f => !f)}
+        data-side={side}
+        role="button"
+        tabIndex={0}
+        aria-label={isAnswer ? 'Answer — press Space to flip' : 'Question — press Space to reveal answer'}
+        onClick={flip}
+        onKeyDown={handleKey}
       >
-        <div className="sp-fc-inner">
-          <div className="sp-fc-face sp-fc-front">
-            <span className="sp-fc-label">Q</span>
-            <p>{card.q}</p>
-          </div>
-          <div className="sp-fc-face sp-fc-back">
-            <span className="sp-fc-label">A</span>
-            <p>{card.a}</p>
-          </div>
+        {/* side badge */}
+        <div className="sp-fc-badge" data-side={side}>
+          {isAnswer ? 'Answer' : 'Question'}
         </div>
-        <span className="sp-fc-hint">{flipped ? 'Click to flip back' : 'Click to reveal'}</span>
-      </button>
 
+        {/* animated content */}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.p
+            key={`${index}-${side}`}
+            className="sp-fc-text"
+            initial={{ opacity: 0, y: dir === 0 ? 10 : dir > 0 ? 18 : -18 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: dir === 0 ? -8 : dir > 0 ? -18 : 18 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {isAnswer ? card.a : card.q}
+          </motion.p>
+        </AnimatePresence>
+
+        <span className="sp-fc-hint">
+          {isAnswer ? 'Space to flip back' : 'Space to reveal · ← → to navigate'}
+        </span>
+      </div>
+
+      {/* nav */}
       <div className="sp-fc-nav">
-        <button type="button" className="sp-fc-nav-btn" aria-label="Previous card" onClick={() => go(-1)}>‹</button>
+        <button type="button" className="sp-fc-nav-btn" aria-label="Previous card" onClick={() => go(-1)}>
+          ← Prev
+        </button>
         <div className="sp-fc-dots">
           {items.map((_, i) => (
             <button
@@ -1432,11 +1470,13 @@ function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
               className="sp-fc-dot"
               data-active={i === index}
               aria-label={`Card ${i + 1}`}
-              onClick={() => { setIndex(i); setFlipped(false); }}
+              onClick={e => { e.stopPropagation(); setDir(i > index ? 1 : -1); setIndex(i); setSide('q'); }}
             />
           ))}
         </div>
-        <button type="button" className="sp-fc-nav-btn" aria-label="Next card" onClick={() => go(1)}>›</button>
+        <button type="button" className="sp-fc-nav-btn" aria-label="Next card" onClick={() => go(1)}>
+          Next →
+        </button>
       </div>
     </div>
   );
