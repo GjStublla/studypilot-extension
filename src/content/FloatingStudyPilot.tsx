@@ -1347,7 +1347,7 @@ export function FloatingStudyPilot({
                       ) : structuredCard?.type === 'quiz' ? (
                         <QuizViewer items={structuredCard.items} />
                       ) : (
-                        <p className="sp-card-body">{card.body}</p>
+                        <p className="sp-card-body">{renderMarkdown(card.body)}</p>
                       )}
                       {cardScreenshotDataUrl ? (
                         <figure className="sp-card-screenshot">
@@ -1431,6 +1431,39 @@ const sectionReveal = {
     transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const },
   },
 };
+
+// ─── Markdown renderer ────────────────────────────────────────────────────────
+// Converts **bold**, *italic*, and \n line breaks into React nodes.
+// No external dependency — keeps the bundle small.
+
+function renderMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const lines = text.split('\n');
+
+  lines.forEach((line, lineIdx) => {
+    if (lineIdx > 0) nodes.push(<br key={`br${lineIdx}`} />);
+
+    // Match **bold** before *italic* so double-asterisk wins
+    const re = /(\*\*(.+?)\*\*|\*(.+?)\*)/g;
+    let cursor = 0;
+    let m: RegExpExecArray | null;
+
+    while ((m = re.exec(line)) !== null) {
+      if (m.index > cursor) nodes.push(line.slice(cursor, m.index));
+
+      if (m[0].startsWith('**')) {
+        nodes.push(<strong key={`b${lineIdx}-${m.index}`}>{m[2]}</strong>);
+      } else {
+        nodes.push(<em key={`i${lineIdx}-${m.index}`}>{m[3]}</em>);
+      }
+      cursor = m.index + m[0].length;
+    }
+
+    if (cursor < line.length) nodes.push(line.slice(cursor));
+  });
+
+  return nodes;
+}
 
 // ─── FlashcardViewer ──────────────────────────────────────────────────────────
 

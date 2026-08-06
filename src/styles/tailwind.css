@@ -819,6 +819,16 @@
   line-height: 1.55;
 }
 
+.sp-card-body strong {
+  color: #f0f3fc;
+  font-weight: 650;
+}
+
+.sp-card-body em {
+  color: #c4cfe8;
+  font-style: italic;
+}
+
 .sp-card-screenshot {
   margin: 0 0 13px;
   overflow: hidden;
