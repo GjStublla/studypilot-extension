@@ -654,8 +654,16 @@ export async function importStudySessionToSupabase(
   const auth = await ensureAuthenticatedSession();
   const activeRubricId = await getActiveRubricId(auth.userId);
   const remoteSessionId = session.remoteSessionId ?? session.id ?? crypto.randomUUID();
-  const screenshotPath = session.screenshotDataUrl
-    ? await uploadSessionCapture(auth, remoteSessionId, session.screenshotDataUrl)
+
+  // Upload screenshot separately so a failed upload doesn't abort the session save.
+  const screenshotUpload = session.screenshotDataUrl
+    ? await uploadSessionCapture(auth, remoteSessionId, session.screenshotDataUrl).catch(
+        (err: unknown) => ({ error: err instanceof Error ? err.message : 'Screenshot upload failed.' }),
+      )
+    : null;
+  const screenshotPath = typeof screenshotUpload === 'string' ? screenshotUpload : null;
+  const screenshotWarning = screenshotUpload && typeof screenshotUpload === 'object'
+    ? screenshotUpload.error
     : null;
 
   const response = await restFetch('sessions?select=id', {
@@ -708,6 +716,10 @@ export async function importStudySessionToSupabase(
     screenshotPath: screenshotPath ?? undefined,
   };
 
+  // Combine warnings from screenshot upload and summary — show whichever exists
+  const combinedWarning =
+    screenshotWarning ?? ('warning' in summary ? summary.warning : undefined);
+
   return {
     ok: true,
     session: savedStudySession,
@@ -715,7 +727,7 @@ export async function importStudySessionToSupabase(
     dashboardUrl: `${DASHBOARD_URL}/${savedRemoteSessionId}`,
     summary: 'summary' in summary ? summary.summary : undefined,
     actionItems: 'actionItems' in summary ? summary.actionItems : undefined,
-    warning: 'warning' in summary ? summary.warning : undefined,
+    warning: combinedWarning,
   };
 }
 
@@ -822,7 +834,8 @@ async function uploadSessionCapture(
   dataUrl: string,
 ): Promise<string> {
   const image = parseImageDataUrl(dataUrl);
-  const path = `${auth.userId}/${sessionId}/capture.jpg`;
+  const ext = image.mimeType === 'image/png' ? 'png' : image.mimeType === 'image/webp' ? 'webp' : 'jpg';
+  const path = `${auth.userId}/${sessionId}/capture.${ext}`;
   const headers = authHeaders(auth);
   headers.set('Content-Type', image.mimeType);
 
@@ -840,8 +853,8 @@ async function uploadSessionCapture(
 }
 
 function parseImageDataUrl(dataUrl: string): { mimeType: string; data: string } {
-  const match = /^data:(image\/jpeg);base64,(.+)$/i.exec(dataUrl);
-  if (!match) throw new Error('Dashboard screenshot capture must be a JPEG image.');
+  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/i.exec(dataUrl);
+  if (!match) throw new Error('Screenshot must be a JPEG, PNG, or WebP image.');
 
   return {
     mimeType: match[1].toLowerCase(),

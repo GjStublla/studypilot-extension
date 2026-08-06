@@ -559,15 +559,15 @@
     0 0 26px rgba(79, 70, 229, 0.55);
 }
 
-/* ---------------------------------------------------------------- composer */
+/* -------------------------------------------------------- composer camera */
 
 .sp-composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px;
+  grid-template-columns: 32px minmax(0, 1fr) 38px;
   align-items: center;
   gap: 8px;
   height: 50px;
-  padding: 6px 6px 6px 20px;
+  padding: 6px 6px 6px 14px;
   border-radius: 999px;
   border: 1.4px solid transparent;
   background-image:
@@ -595,6 +595,101 @@
 .sp-composer input::placeholder {
   color: #7d84a2;
 }
+
+.sp-camera-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: var(--sp-muted);
+  flex: 0 0 auto;
+  transition: color 140ms var(--sp-ease), background 140ms var(--sp-ease);
+}
+
+.sp-camera-btn:hover {
+  color: var(--sp-cyan);
+  background: rgba(92, 216, 255, 0.1);
+}
+
+.sp-camera-btn[data-active="true"] {
+  color: var(--sp-cyan);
+  background: rgba(92, 216, 255, 0.12);
+}
+
+.sp-camera-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--sp-azure);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------- screenshot strip */
+
+.sp-paste-zone {
+  display: contents; /* renders children inline without adding layout */
+}
+
+.sp-screenshot-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 4px 4px;
+  overflow: hidden;
+}
+
+.sp-screenshot-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 80px;
+  height: 52px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(92, 216, 255, 0.32);
+  background: rgba(6, 8, 16, 0.8);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+
+.sp-screenshot-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sp-screenshot-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(10, 12, 24, 0.88);
+  color: #e8eaf6;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  transition: background 120ms var(--sp-ease), color 120ms var(--sp-ease);
+}
+
+.sp-screenshot-remove:hover {
+  background: rgba(239, 68, 68, 0.85);
+  color: #fff;
+}
+
+
 
 .sp-send {
   display: grid;

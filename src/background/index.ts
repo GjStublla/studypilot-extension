@@ -212,6 +212,12 @@ async function prepareCoachingRequest(
   request: CoachingRequest,
   sender: chrome.runtime.MessageSender,
 ): Promise<CoachingRequest> {
+  // If images were already attached by the content script, skip captureVisibleTab
+  // entirely — calling it without a fresh activeTab gesture throws a permission error.
+  if ((request.images ?? []).length > 0) return request;
+
+  // context.screenshot is only set true when no images were pre-attached and
+  // the user has the global "screenshot on" toggle enabled.
   if (!request.context.screenshot) return request;
 
   const capture = await captureVisibleTab(sender);

@@ -20,6 +20,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Volume2,
+  X,
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
@@ -31,6 +32,7 @@ import {
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
 import {
   STUDY_FOLDERS,
+  type CoachingImage,
   type CoachingRequest,
   type CoachingResponse,
   type ContextShareSettings,
@@ -217,8 +219,9 @@ export function FloatingStudyPilot({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [transcript, setTranscript] = useState<StudyTranscriptTurn[]>([]);
-  const [lastScreenshotDataUrl, setLastScreenshotDataUrl] = useState<string | null>(null);
   const [cardScreenshotDataUrl, setCardScreenshotDataUrl] = useState<string | null>(null);
+  // Screenshots attached to the *next* message the user will send
+  const [pendingScreenshots, setPendingScreenshots] = useState<string[]>([]);
 
   const [context, setContext] = useState<ContextShareSettings>({
     screenshot: false,
@@ -400,6 +403,23 @@ export function FloatingStudyPilot({
     setLastQuestion(studentText);
     setCardScreenshotDataUrl(null);
 
+    // Snapshot & clear pending screenshots so they are attached to this request only
+    const attachedScreenshots = pendingScreenshots.slice();
+    setPendingScreenshots([]);
+
+    // Convert data URLs → CoachingImage objects for the AI payload.
+    // The background won't need to call captureVisibleTab for these.
+    const attachedImages: CoachingImage[] = attachedScreenshots
+      .map((dataUrl): CoachingImage | null => {
+        const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/i.exec(dataUrl);
+        if (!match) return null;
+        return {
+          mimeType: match[1].toLowerCase() as CoachingImage['mimeType'],
+          data: match[2],
+        };
+      })
+      .filter((img): img is CoachingImage => img !== null);
+
     try {
       const response = await sendRuntimeMessage<CoachingResponse>({
         type: 'STUDYPILOT_REQUEST_COACHING',
@@ -410,7 +430,12 @@ export function FloatingStudyPilot({
           question: prompt,
           userMessage: studentText,
           page,
-          context,
+          context: {
+            ...context,
+            // Only ask the background to call captureVisibleTab if the global
+            // toggle is on AND the user hasn't already attached images manually.
+            screenshot: context.screenshot && attachedImages.length === 0,
+          },
           originSurface: 'extension',
           clientContext: {
             page: { title: page.sourceTitle, url: page.sourceUrl },
@@ -418,6 +443,10 @@ export function FloatingStudyPilot({
             selection: page.selectedText,
             integrity: 'extension-v1',
           },
+          // Pre-attach images so the background skips captureVisibleTab
+          images: attachedImages,
+          // Pass the first data URL through for the card preview
+          screenshotDataUrl: attachedScreenshots[0],
         } as CoachingRequest,
       });
 
@@ -437,7 +466,8 @@ export function FloatingStudyPilot({
       }
 
       const responseText = response.text.trim();
-      const screenshotDataUrl = response.screenshotDataUrl ?? null;
+      // Use whatever the background echoed back, or fall back to what we sent
+      const screenshotDataUrl = response.screenshotDataUrl ?? attachedScreenshots[0] ?? null;
 
       // Capture the server-assigned chatId from the commit so subsequent
       // requests in this session attach to the same chat.
@@ -455,7 +485,7 @@ export function FloatingStudyPilot({
       const nextTranscript = [...priorTranscript, userTurn, aiTurn];
 
       setTranscript(nextTranscript);
-      if (screenshotDataUrl) setLastScreenshotDataUrl(screenshotDataUrl);
+      // Always update so it doesn't bleed into the next message
       setCardScreenshotDataUrl(screenshotDataUrl);
       setCard({
         title: response.title || titleForAction(action, prompt),
@@ -480,7 +510,7 @@ export function FloatingStudyPilot({
           questionText: studentText,
           answerText: responseText,
           transcriptSnapshot: nextTranscript,
-          screenshotDataUrl: context.screenshot ? screenshotDataUrl ?? undefined : undefined,
+          screenshotDataUrl: screenshotDataUrl ?? undefined,
           successNotice: 'Saved to StudyPilot',
         });
       }
@@ -502,9 +532,9 @@ export function FloatingStudyPilot({
 
   function handleSubmit() {
     const text = question.trim();
-    if (!text) return;
+    if (!text && pendingScreenshots.length === 0) return;
     setQuestion('');
-    void runStudyAction('explain', text);
+    void runStudyAction('explain', text || 'What can you tell me about this screenshot?');
   }
 
   async function saveToDashboard() {
@@ -527,8 +557,7 @@ export function FloatingStudyPilot({
       answer: answerText,
       transcript: transcriptSnapshot,
       screenshotDataUrl:
-        options.screenshotDataUrl ??
-        (context.screenshot ? lastScreenshotDataUrl ?? undefined : undefined),
+        options.screenshotDataUrl ?? undefined,
       tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
     });
 
@@ -556,7 +585,14 @@ export function FloatingStudyPilot({
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save right now';
-      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not save right now');
+      flashNotice(
+        message.includes('connected') || message.includes('session') || message.includes('expired')
+          ? 'Connect dashboard first'
+          : message.length < 80
+            ? message
+            : 'Could not save right now',
+        3500,
+      );
     } finally {
       setIsSaving(false);
     }
@@ -573,8 +609,10 @@ export function FloatingStudyPilot({
     }
   }
 
-  async function captureSnapshot() {
+  /** Capture a screenshot and attach it to the composer for the next message. */
+  async function captureAndAttach() {
     try {
+      flashNotice('Capturing…', 1400);
       const snapshot = await sendRuntimeMessage<{
         dataUrl: string;
         mimeType: string;
@@ -582,14 +620,70 @@ export function FloatingStudyPilot({
         type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
       });
       if (snapshot?.dataUrl) {
-        setLastScreenshotDataUrl(snapshot.dataUrl);
-        setCardScreenshotDataUrl(snapshot.dataUrl);
-        setContext(prev => ({ ...prev, screenshot: true }));
-        flashNotice('Screenshot ready for coaching', 2600);
+        setPendingScreenshots(prev => [...prev, snapshot.dataUrl]);
+        flashNotice('Screenshot attached', 2200);
       }
     } catch {
       flashNotice('Could not capture screenshot', 3000);
     }
+  }
+
+  function removePendingScreenshot(index: number) {
+    setPendingScreenshots(prev => prev.filter((_, i) => i !== index));
+  }
+
+  /** Convert image Files/Blobs to JPEG data URLs (max 1024px) and add to pending list. */
+  async function addImageFiles(files: File[] | DataTransferItemList | FileList) {
+    const fileArray = Array.from(files as Iterable<File | DataTransferItem>)
+      .map(item => ('getAsFile' in item ? item.getAsFile() : item as File))
+      .filter((f): f is File => f !== null && f.type.startsWith('image/'));
+
+    if (fileArray.length === 0) return;
+
+    const dataUrls = await Promise.all(
+      fileArray.map(
+        file =>
+          new Promise<string | null>(resolve => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(file);
+          }),
+      ),
+    );
+
+    const valid = dataUrls.filter((u): u is string => u !== null);
+    if (valid.length > 0) {
+      setPendingScreenshots(prev => [...prev, ...valid]);
+      flashNotice(valid.length === 1 ? 'Image attached' : `${valid.length} images attached`, 2000);
+    }
+  }
+
+  /** Handle Ctrl+V paste of images into the composer. */
+  function handleComposerPaste(event: React.ClipboardEvent<HTMLDivElement>) {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+
+    const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+
+    // Prevent the default only when there are images so text paste still works.
+    event.preventDefault();
+    void addImageFiles(items);
+  }
+
+  /** Open the OS file picker for image selection. */
+  function openFilePicker() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileInputChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      void addImageFiles(files);
+    }
+    // Reset so the same file can be picked again
+    event.target.value = '';
   }
 
   function speakAnswer() {
@@ -629,6 +723,8 @@ export function FloatingStudyPilot({
   // Web Speech API recognition instance — kept in a ref so start/stop
   // work across renders without creating multiple instances.
   const recognitionRef = useRef<any>(null);
+  // Hidden file input for the "pick from file explorer" flow
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function toggleMic() {
     if (micOn) {
@@ -772,10 +868,10 @@ export function FloatingStudyPilot({
                     >
                       <MenuItem
                         icon={<Camera size={16} />}
-                        label="Check image capture"
+                        label="Capture tab screenshot"
                         onClick={() => {
                           setMenuOpen(false);
-                          void captureSnapshot();
+                          void captureAndAttach();
                         }}
                       />
                       <MenuItem
@@ -886,11 +982,64 @@ export function FloatingStudyPilot({
                 ) : null}
               </AnimatePresence>
 
+              {/* Paste-zone: wraps the strip + composer so Ctrl+V anywhere in this area attaches images */}
+              <div className="sp-paste-zone" onPaste={handleComposerPaste}>
+              <AnimatePresence>
+                {pendingScreenshots.length > 0 ? (
+                  <motion.div
+                    key="screenshot-preview"
+                    className="sp-screenshot-strip"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    {pendingScreenshots.map((url, i) => (
+                      <div key={i} className="sp-screenshot-thumb">
+                        <img src={url} alt={`Screenshot ${i + 1}`} />
+                        <button
+                          type="button"
+                          className="sp-screenshot-remove"
+                          aria-label="Remove screenshot"
+                          onClick={() => removePendingScreenshot(i)}
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+
               <motion.div className="sp-composer" variants={sectionReveal}>
+                <button
+                  type="button"
+                  className="sp-camera-btn"
+                  aria-label="Attach screenshot"
+                  title="Attach image (or paste with Ctrl+V)"
+                  onClick={openFilePicker}
+                  data-active={pendingScreenshots.length > 0}
+                >
+                  <Camera size={17} strokeWidth={2} />
+                  {pendingScreenshots.length > 0 ? (
+                    <span className="sp-camera-badge">{pendingScreenshots.length}</span>
+                  ) : null}
+                </button>
+                {/* Hidden file input — accepts all common image formats */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  multiple
+                  style={{ display: 'none' }}
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onChange={handleFileInputChange}
+                />
                 <input
                   type="text"
                   value={question}
-                  placeholder="Ask a question or say something..."
+                  placeholder="Ask a question or paste an image…"
                   aria-label="Ask a question"
                   onChange={event => setQuestion(event.target.value)}
                   onKeyDown={event => {
@@ -905,11 +1054,12 @@ export function FloatingStudyPilot({
                   className="sp-send"
                   aria-label="Send question"
                   onClick={handleSubmit}
-                  disabled={!question.trim()}
+                  disabled={!question.trim() && pendingScreenshots.length === 0}
                 >
                   <Send size={17} strokeWidth={2} fill="currentColor" />
                 </button>
               </motion.div>
+              </div>{/* end paste-zone */}
 
               <motion.div className="sp-chips" variants={sectionReveal}>
                 <QuickChip label="Summarize" onClick={() => void runStudyAction('summarize')}>
