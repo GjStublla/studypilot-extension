@@ -27,6 +27,21 @@ import type {
 const CAPTURE_MAX_EDGE = 1024;
 const CAPTURE_JPEG_QUALITY = 0.72;
 
+/** Resolve a message handler promise into a sendResponse call. */
+function respond<T>(
+  promise: Promise<T>,
+  sendResponse: (r: unknown) => void,
+): void {
+  promise
+    .then((data: T) => sendResponse({ ok: true, data }))
+    .catch((error: unknown) =>
+      sendResponse({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.action.setTitle({ title: 'Toggle Study Pilot' }).catch(() => undefined);
 });
@@ -72,155 +87,82 @@ chrome.runtime.onMessage.addListener(
         return false;
 
       case 'STUDYPILOT_GET_AUTH_STATUS':
-        getAuthStatus()
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(getAuthStatus(), sendResponse);
         return true;
 
       case 'STUDYPILOT_CONNECT_SESSION':
-        storeExtensionSession(message.payload)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(storeExtensionSession(message.payload), sendResponse);
         return true;
 
       case 'STUDYPILOT_DISCONNECT_SESSION':
-        clearExtensionSession()
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(clearExtensionSession(), sendResponse);
         return true;
 
       case 'STUDYPILOT_CAPTURE_VISIBLE_TAB':
-        captureVisibleTab(sender)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(captureVisibleTab(sender), sendResponse);
         return true;
 
       case 'STUDYPILOT_GET_SHARED_CONTEXT':
-        getSharedChatContext()
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(getSharedChatContext(), sendResponse);
         return true;
 
       case 'STUDYPILOT_GET_CHAT_MESSAGES':
-        getDashboardChatMessages(message.payload.chatId)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(getDashboardChatMessages(message.payload.chatId), sendResponse);
         return true;
 
       case 'STUDYPILOT_CREATE_CHAT':
-        createDashboardChat(message.payload.title, message.payload.sessionId ?? null)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(
+          createDashboardChat(message.payload.title, message.payload.sessionId ?? null),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_CONTINUE_SESSION':
-        getOrCreateSessionChat(message.payload.sessionId, message.payload.title)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(
+          getOrCreateSessionChat(message.payload.sessionId, message.payload.title),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_SELECT_CHAT':
-        setActiveDashboardChat(message.payload.chatId)
-          .then(() => sendResponse({ ok: true, data: { selected: true } }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(
+          setActiveDashboardChat(message.payload.chatId).then(() => ({ selected: true as const })),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_REQUEST_COACHING':
-        prepareCoachingRequest(message.payload, sender)
-          .then(async request => ({
+        respond(
+          prepareCoachingRequest(message.payload, sender).then(async request => ({
             ...await requestCoaching(request),
             screenshotDataUrl: request.screenshotDataUrl,
-          }))
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+          })),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_GET_LIVE_TOKEN':
-        requestLiveToken(message.payload?.sessionId)
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(requestLiveToken(message.payload?.sessionId), sendResponse);
         return true;
 
       case 'STUDYPILOT_SAVE_SESSION':
-        syncStudySessionToSupabase(
-          message.payload.chatId,
-          message.payload.session,
-          message.payload.finalize ?? false,
-        )
-          .then(data => sendResponse({ ok: true, data }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(
+          syncStudySessionToSupabase(
+            message.payload.chatId,
+            message.payload.session,
+            message.payload.finalize ?? false,
+          ),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_OPEN_DASHBOARD':
-        chrome.tabs
-          .create({ url: message.payload?.url ?? DASHBOARD_URL })
-          .then(() => sendResponse({ ok: true, data: { opened: true } }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
+        respond(
+          chrome.tabs
+            .create({ url: message.payload?.url ?? DASHBOARD_URL })
+            .then(() => ({ opened: true as const })),
+          sendResponse,
+        );
         return true;
 
       case 'STUDYPILOT_OPEN_MODAL':

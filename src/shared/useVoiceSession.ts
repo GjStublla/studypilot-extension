@@ -226,6 +226,8 @@ export function useVoiceSession(): VoiceSessionState & VoiceSessionControls {
           const text = pendingModelTextRef.current.trim();
           if (text) {
             const turn: StudyTranscriptTurn = {
+              id: crypto.randomUUID(),
+              sequence: Date.now(),
               role: 'ai',
               text,
               atSeconds: Math.max(
@@ -258,6 +260,8 @@ export function useVoiceSession(): VoiceSessionState & VoiceSessionControls {
         const it = data.inputTranscription as Record<string, unknown>;
         if (typeof it.text === 'string' && it.text.trim()) {
           const turn: StudyTranscriptTurn = {
+            id: crypto.randomUUID(),
+            sequence: Date.now(),
             role: 'user',
             text: it.text.trim(),
             atSeconds: Math.max(
@@ -357,7 +361,7 @@ export function useVoiceSession(): VoiceSessionState & VoiceSessionControls {
         // responseModalities must be ['AUDIO'] only for this model.
         const setup = {
           setup: {
-            model: tokenResult.model,
+            model: 'gemini-live-2.5-flash-native-audio',
             generationConfig: {
               responseModalities: ['AUDIO'],
             },

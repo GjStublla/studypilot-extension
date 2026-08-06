@@ -123,7 +123,7 @@ export interface ExtensionAuthState {
 }
 
 export interface CoachingRequest {
-  chatId: string;
+  chatId?: string;
   requestId: string;
   action: StudyAction;
   question?: string;

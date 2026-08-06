@@ -31,6 +31,7 @@ import {
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
 import {
   STUDY_FOLDERS,
+  type CoachingRequest,
   type CoachingResponse,
   type ContextShareSettings,
   type DashboardSaveResult,
@@ -227,6 +228,9 @@ export function FloatingStudyPilot({
     folder: 'Biology 101',
   });
 
+  // Session-scoped chat ID — null until the server assigns one via the first coaching response commit.
+  const sessionChatIdRef = useRef<string | null>(null);
+
   const noticeTimer = useRef<number | undefined>(undefined);
   const sessionStartedAt = useRef(Date.now());
 
@@ -383,6 +387,8 @@ export function FloatingStudyPilot({
     const studentText = prompt || defaultPromptForAction(action);
     const priorTranscript = transcript;
     const userTurn: StudyTranscriptTurn = {
+      id: crypto.randomUUID(),
+      sequence: transcript.length,
       role: 'user',
       text: studentText,
       atSeconds: elapsedSeconds(),
@@ -398,15 +404,21 @@ export function FloatingStudyPilot({
       const response = await sendRuntimeMessage<CoachingResponse>({
         type: 'STUDYPILOT_REQUEST_COACHING',
         payload: {
+          ...(sessionChatIdRef.current ? { chatId: sessionChatIdRef.current } : {}),
+          requestId: crypto.randomUUID(),
           action,
           question: prompt,
+          userMessage: studentText,
           page,
           context,
-          history: priorTranscript.slice(-12).map(turn => ({
-            role: turn.role,
-            text: turn.text,
-          })),
-        },
+          originSurface: 'extension',
+          clientContext: {
+            page: { title: page.sourceTitle, url: page.sourceUrl },
+            action,
+            selection: page.selectedText,
+            integrity: 'extension-v1',
+          },
+        } as CoachingRequest,
       });
 
       if (!response) {
@@ -426,7 +438,16 @@ export function FloatingStudyPilot({
 
       const responseText = response.text.trim();
       const screenshotDataUrl = response.screenshotDataUrl ?? null;
+
+      // Capture the server-assigned chatId from the commit so subsequent
+      // requests in this session attach to the same chat.
+      if (response.commit?.chatId) {
+        sessionChatIdRef.current = response.commit.chatId;
+      }
+
       const aiTurn: StudyTranscriptTurn = {
+        id: crypto.randomUUID(),
+        sequence: priorTranscript.length + 1,
         role: 'ai',
         text: responseText,
         atSeconds: Math.max(userTurn.atSeconds + 1, elapsedSeconds()),
@@ -514,7 +535,7 @@ export function FloatingStudyPilot({
     try {
       const response = await sendRuntimeMessage<DashboardSaveResult>({
         type: 'STUDYPILOT_SAVE_SESSION',
-        payload: { session },
+        payload: { chatId: sessionChatIdRef.current ?? '', session },
       });
 
       if (!response) {
@@ -1359,8 +1380,8 @@ function makeSpeechUtterance(text: string): SpeechSynthesisUtterance {
 
 function fallbackTranscript(question: string, answer: string): StudyTranscriptTurn[] {
   const turns: StudyTranscriptTurn[] = [
-    { role: 'user', text: question, atSeconds: 0 },
-    { role: 'ai', text: answer, atSeconds: 1 },
+    { id: crypto.randomUUID(), sequence: 0, role: 'user', text: question, atSeconds: 0 },
+    { id: crypto.randomUUID(), sequence: 1, role: 'ai', text: answer, atSeconds: 1 },
   ];
 
   return turns.filter(turn => turn.text.trim().length > 0);

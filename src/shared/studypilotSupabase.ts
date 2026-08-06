@@ -575,9 +575,9 @@ export async function requestCoaching(
   request: CoachingRequest,
 ): Promise<CoachingResponse> {
   const response = await edgeFetch('socratic-coach', {
-    sessionId: request.sessionId,
+    ...(request.chatId ? { chatId: request.chatId } : {}),
+    requestId: request.requestId,
     userMessage: buildCoachingMessage(request),
-    history: request.history ?? [],
     images: request.images ?? [],
   });
 
@@ -588,6 +588,16 @@ export async function requestCoaching(
   const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
+  let commit: import('./types').CoachingCommit | null = null;
+
+  const fallbackCommit = (): import('./types').CoachingCommit => ({
+    chatId: request.chatId ?? '',
+    requestId: request.requestId,
+    userMessageId: crypto.randomUUID(),
+    assistantMessageId: crypto.randomUUID(),
+    userSequence: 0,
+    assistantSequence: 1,
+  });
 
   while (true) {
     const { done, value } = await reader.read();
@@ -606,6 +616,7 @@ export async function requestCoaching(
         return {
           title: titleForAction(request.action, request.question),
           text: text.trim(),
+          commit: commit ?? fallbackCommit(),
         };
       }
 
@@ -618,12 +629,22 @@ export async function requestCoaching(
 
       if (hasStringProperty(parsed, 'error')) throw new Error(parsed.error);
       if (hasStringProperty(parsed, 'text')) text += parsed.text;
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        'commit' in parsed &&
+        parsed.commit &&
+        typeof parsed.commit === 'object'
+      ) {
+        commit = parsed.commit as import('./types').CoachingCommit;
+      }
     }
   }
 
   return {
     title: titleForAction(request.action, request.question),
     text: text.trim(),
+    commit: commit ?? fallbackCommit(),
   };
 }
 
@@ -863,4 +884,194 @@ function hasStringProperty<K extends string>(
     && value !== null
     && key in value
     && typeof (value as Record<K, unknown>)[key] === 'string';
+}
+
+// ─── Dashboard chat functions ─────────────────────────────────────────────────
+
+export async function getSharedChatContext(): Promise<import('./types').SharedChatContext> {
+  const auth = await ensureAuthenticatedSession();
+
+  const [chatsResp, sessionsResp, activeResp] = await Promise.all([
+    restFetch(
+      `chats?select=id,session_id,title,created_at,updated_at&user_id=eq.${auth.userId}&order=updated_at.desc&limit=50`,
+      { headers: { Accept: 'application/json' } },
+    ),
+    restFetch(
+      `sessions?select=id,title,source,mode,page_title,page_url,when_timestamp&user_id=eq.${auth.userId}&order=when_timestamp.desc&limit=50`,
+      { headers: { Accept: 'application/json' } },
+    ),
+    restFetch(
+      `user_preferences?select=active_chat_id&user_id=eq.${auth.userId}&limit=1`,
+      { headers: { Accept: 'application/json' } },
+    ),
+  ]);
+
+  const chatsRaw = chatsResp.ok
+    ? await parseJsonResponse<Array<{ id: string; session_id: string | null; title: string; created_at: string; updated_at: string }>>(chatsResp)
+    : [];
+
+  const sessionsRaw = sessionsResp.ok
+    ? await parseJsonResponse<Array<{ id: string; title: string; source: string | null; mode: string; page_title: string | null; page_url: string | null; when_timestamp: string }>>(sessionsResp)
+    : [];
+
+  const prefsRaw = activeResp.ok
+    ? await parseJsonResponse<Array<{ active_chat_id: string | null }>>(activeResp)
+    : [];
+
+  const chats: import('./types').DashboardChatSummary[] = chatsRaw.map(c => ({
+    id: c.id,
+    sessionId: c.session_id,
+    title: c.title,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  }));
+
+  const sessions: import('./types').DashboardSessionSummary[] = sessionsRaw.map(s => ({
+    id: s.id,
+    title: s.title,
+    source: s.source,
+    mode: (s.mode as import('./types').StudyPilotSessionMode) ?? 'Study Coach',
+    pageTitle: s.page_title,
+    pageUrl: s.page_url,
+    whenTimestamp: s.when_timestamp,
+  }));
+
+  return {
+    userId: auth.userId,
+    chats,
+    sessions,
+    activeChatId: prefsRaw[0]?.active_chat_id ?? null,
+  };
+}
+
+export async function getDashboardChatMessages(chatId: string): Promise<import('./types').DashboardChatMessage[]> {
+  const response = await restFetch(
+    `chat_messages?select=id,chat_id,session_id,role,text,sequence,request_id,origin_surface,created_at&chat_id=eq.${encodeURIComponent(chatId)}&order=sequence.asc`,
+    { headers: { Accept: 'application/json' } },
+  );
+
+  if (!response.ok) throw await responseError(response);
+
+  const raw = await parseJsonResponse<Array<{
+    id: string;
+    chat_id: string;
+    session_id: string | null;
+    role: string;
+    text: string;
+    sequence: number;
+    request_id?: string | null;
+    origin_surface?: string | null;
+    created_at: string;
+  }>>(response);
+
+  return raw.map(m => ({
+    id: m.id,
+    chatId: m.chat_id,
+    sessionId: m.session_id,
+    role: m.role as 'user' | 'ai' | 'system',
+    text: m.text,
+    sequence: m.sequence,
+    requestId: m.request_id,
+    originSurface: m.origin_surface as import('./types').DashboardChatMessage['originSurface'],
+    createdAt: m.created_at,
+  }));
+}
+
+export async function createDashboardChat(
+  title: string,
+  sessionId: string | null,
+): Promise<import('./types').DashboardChatSummary> {
+  const auth = await ensureAuthenticatedSession();
+
+  const response = await restFetch('chats?select=id,session_id,title,created_at,updated_at', {
+    method: 'POST',
+    headers: { Prefer: 'return=representation' },
+    body: JSON.stringify({
+      user_id: auth.userId,
+      session_id: sessionId,
+      title,
+    }),
+  });
+
+  if (!response.ok) throw await responseError(response);
+
+  const rows = await parseJsonResponse<Array<{
+    id: string;
+    session_id: string | null;
+    title: string;
+    created_at: string;
+    updated_at: string;
+  }>>(response);
+
+  const row = rows[0];
+  if (!row) throw new Error('Chat was not created.');
+
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    title: row.title,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function getOrCreateSessionChat(
+  sessionId: string,
+  title: string,
+): Promise<import('./types').DashboardChatSummary> {
+  const auth = await ensureAuthenticatedSession();
+
+  // Check for an existing chat linked to this session.
+  const existing = await restFetch(
+    `chats?select=id,session_id,title,created_at,updated_at&user_id=eq.${auth.userId}&session_id=eq.${encodeURIComponent(sessionId)}&limit=1`,
+    { headers: { Accept: 'application/json' } },
+  );
+
+  if (existing.ok) {
+    const rows = await parseJsonResponse<Array<{
+      id: string;
+      session_id: string | null;
+      title: string;
+      created_at: string;
+      updated_at: string;
+    }>>(existing);
+
+    if (rows[0]) {
+      return {
+        id: rows[0].id,
+        sessionId: rows[0].session_id,
+        title: rows[0].title,
+        createdAt: rows[0].created_at,
+        updatedAt: rows[0].updated_at,
+      };
+    }
+  }
+
+  return createDashboardChat(title, sessionId);
+}
+
+export async function setActiveDashboardChat(chatId: string | null): Promise<void> {
+  const auth = await ensureAuthenticatedSession();
+
+  await restFetch('user_preferences', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({
+      user_id: auth.userId,
+      active_chat_id: chatId,
+    }),
+  });
+}
+
+/**
+ * Save (or incrementally update) a study session to the dashboard.
+ * This wraps `importStudySessionToSupabase` but also accepts a `chatId`
+ * for chat-linked sessions.
+ */
+export async function syncStudySessionToSupabase(
+  _chatId: string,
+  session: StudySession,
+  _finalize = false,
+): Promise<DashboardSaveResult> {
+  return importStudySessionToSupabase({ ...session, remoteSessionId: session.remoteSessionId });
 }

@@ -89,7 +89,7 @@ export function VoiceSession({
               ))}
               {partialModelText && (
                 <TranscriptBubble
-                  turn={{ role: 'ai', text: partialModelText, atSeconds: 0 }}
+                  turn={{ id: '', sequence: -1, role: 'ai', text: partialModelText, atSeconds: 0 }}
                   partial
                 />
               )}
