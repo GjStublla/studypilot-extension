@@ -5,19 +5,20 @@ import {
   Camera,
   Check,
   ChevronDown,
+  CirclePause,
+  CirclePlay,
   Copy,
   Crown,
   ExternalLink,
+  Headphones,
   Mic,
   MicOff,
   Minus,
   MoreVertical,
-  Pause,
   Pin,
-  Play,
   Send,
-  Settings,
   ShieldCheck,
+  SlidersHorizontal,
   ThumbsDown,
   ThumbsUp,
   Volume2,
@@ -605,10 +606,11 @@ export function FloatingStudyPilot({
       freshPage = getPageContext();
     }
 
+    // Keep instructions minimal to avoid hitting the streaming token limit mid-JSON.
     const formatInstruction =
       action === 'flashcards'
-        ? ' Respond ONLY with a valid JSON array, no markdown fences, no other text. Format: [{"q":"question text","a":"answer text"},…] with 5–8 items. Base every card ONLY on the PAGE CONTENT provided above — do not use outside knowledge.'
-        : ' Respond ONLY with a valid JSON array, no markdown fences, no other text. Format: [{"question":"question text","options":["A) …","B) …","C) …","D) …"],"answer":0},…] where "answer" is the 0-based index of the correct option. Include 4–6 questions. Base every question and its correct answer ONLY on the PAGE CONTENT provided above — do not use outside knowledge or invent facts.';
+        ? ' Reply with ONLY a JSON array. No other text. Schema: [{"q":"...","a":"..."}]. Exactly 5 items.'
+        : ' Reply with ONLY a JSON array. No other text. Schema: [{"question":"...","options":["A) ...","B) ...","C) ...","D) ..."],"answer":0}]. Exactly 4 items. "answer" is the 0-based index of the correct option.';
 
     const studentText = defaultPromptForAction(action) + formatInstruction;
 
@@ -636,18 +638,67 @@ export function FloatingStudyPilot({
 
       if (!response?.text.trim()) throw new Error('No response from StudyPilot AI.');
 
-      const jsonText = response.text.trim()
-        .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-      const raw = JSON.parse(jsonText) as unknown;
+      // Strip any markdown fences the model adds despite instructions
+      let jsonText = response.text.trim()
+        .replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
 
-      if (!Array.isArray(raw) || raw.length === 0) throw new Error('Unexpected AI response format.');
+      // Repair truncated JSON — the SSE stream sometimes ends before the JSON is complete.
+      // Work backwards to find the last fully-closed object, then close the array.
+      if (!jsonText.endsWith(']')) {
+        const lastClose = jsonText.lastIndexOf('}');
+        if (lastClose === -1) {
+          throw new Error('The AI response was cut off too early. Try again — it usually works on the second attempt.');
+        }
+        jsonText = jsonText.slice(0, lastClose + 1) + ']';
+      }
 
-      if (action === 'flashcards' && 'q' in (raw[0] as object)) {
-        setStructuredCard({ type: 'flashcards', items: raw as FlashcardItem[] });
-      } else if (action === 'quiz' && 'question' in (raw[0] as object)) {
-        setStructuredCard({ type: 'quiz', items: raw as QuizItem[] });
+      let raw: unknown;
+      try {
+        raw = JSON.parse(jsonText);
+      } catch {
+        // Second-pass repair: the truncation may be inside a string value.
+        // Find the last '}' that results in valid JSON when we close the array after it.
+        let repaired: unknown = null;
+        let cursor = jsonText.lastIndexOf('}');
+        while (cursor > 0) {
+          try {
+            repaired = JSON.parse(jsonText.slice(0, cursor + 1) + ']');
+            break;
+          } catch {
+            cursor = jsonText.lastIndexOf('}', cursor - 1);
+          }
+        }
+        if (!repaired) {
+          throw new Error('Could not parse AI response. Try again — it usually works on the second attempt.');
+        }
+        raw = repaired;
+      }
+
+      if (!Array.isArray(raw) || raw.length === 0) {
+        throw new Error('AI returned an empty list. Try again.');
+      }
+
+      const first = raw[0] as Record<string, unknown>;
+
+      if (action === 'flashcards') {
+        if (typeof first.q === 'string' && typeof first.a === 'string') {
+          setStructuredCard({ type: 'flashcards', items: raw as FlashcardItem[] });
+        } else if (typeof first.question === 'string' && Array.isArray(first.options)) {
+          // AI returned quiz format — convert to flashcards
+          const converted: FlashcardItem[] = (raw as QuizItem[]).map(item => ({
+            q: item.question,
+            a: item.options[item.answer] ?? item.options[0] ?? '',
+          }));
+          setStructuredCard({ type: 'flashcards', items: converted });
+        } else {
+          throw new Error('Unexpected flashcard format. Try again.');
+        }
       } else {
-        throw new Error('Could not parse structured content.');
+        if (typeof first.question === 'string' && Array.isArray(first.options)) {
+          setStructuredCard({ type: 'quiz', items: raw as QuizItem[] });
+        } else {
+          throw new Error('Unexpected quiz format. Try again.');
+        }
       }
     } catch (err) {
       setStudyError(err instanceof Error ? err.message : 'Could not load content. Try again.');
@@ -1121,21 +1172,21 @@ export function FloatingStudyPilot({
                   label={micOn ? 'Mute microphone' : 'Unmute microphone'}
                   onClick={toggleMic}
                 >
-                  {micOn ? <Mic size={22} /> : <MicOff size={22} />}
+                  {micOn ? <Mic size={20} strokeWidth={1.75} /> : <MicOff size={20} strokeWidth={1.75} />}
                 </RoundButton>
                 <RoundButton
                   active={isSpeaking}
                   label={isSpeaking ? 'Stop reading aloud' : 'Read answer aloud'}
                   onClick={speakAnswer}
                 >
-                  <Volume2 size={22} />
+                  <Headphones size={20} strokeWidth={1.75} />
                 </RoundButton>
                 <RoundButton
                   active={false}
                   label={paused ? 'Resume session' : 'Pause session'}
                   onClick={() => setPaused(value => !value)}
                 >
-                  {paused ? <Play size={22} /> : <Pause size={22} />}
+                  {paused ? <CirclePlay size={20} strokeWidth={1.75} /> : <CirclePause size={20} strokeWidth={1.75} />}
                 </RoundButton>
                 <RoundButton
                   active={settingsOpen}
@@ -1143,7 +1194,7 @@ export function FloatingStudyPilot({
                   label="Session settings"
                   onClick={() => setSettingsOpen(value => !value)}
                 >
-                  <Settings size={22} />
+                  <SlidersHorizontal size={20} strokeWidth={1.75} />
                 </RoundButton>
               </motion.div>
 

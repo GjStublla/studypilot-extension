@@ -301,12 +301,12 @@
   position: relative;
   display: grid;
   justify-items: center;
-  padding: 2px 0 4px;
+  padding: 18px 0 4px;
 }
 
 .sp-presence-dot {
   position: absolute;
-  top: 16px;
+  top: 22px;
   left: 58px;
   width: 7px;
   height: 7px;
@@ -324,7 +324,7 @@
   place-items: center;
   width: 240px;
   height: 240px;
-  margin: -20px 0 -42px;
+  margin: 8px 0 -42px;
   animation: sp-breathe 4.6s ease-in-out infinite;
   transition: filter 400ms var(--sp-ease);
 }
