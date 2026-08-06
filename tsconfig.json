@@ -18,10 +18,12 @@
     "types": ["chrome", "vite/client"],
     "ignoreDeprecations": "5.0",
     "baseUrl": ".",
+    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
   "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/*.spec.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

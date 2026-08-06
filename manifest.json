@@ -1,13 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "StudyPilot",
-  "short_name": "StudyPilot",
-  "version": "0.1.0",
-  "description": "A calm study companion for asking questions about the page, saving explanations, and reviewing sessions later.",
+  "name": "Study Pilot",
+  "short_name": "Study Pilot",
+  "version": "0.2.0",
+  "description": "A voice-first study companion. One panel for asking about the page, quick study actions, and saving explanations.",
   "minimum_chrome_version": "116",
   "action": {
-    "default_title": "Open StudyPilot",
-    "default_popup": "src/popup/index.html"
+    "default_title": "Toggle Study Pilot"
   },
   "background": {
     "service_worker": "src/background/index.ts",
@@ -20,8 +19,18 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["activeTab"],
-  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
+  "permissions": ["activeTab", "storage", "microphone"],
+  "host_permissions": [
+    "https://*.supabase.co/*",
+    "https://studypilot.app/*",
+    "https://*.studypilot.ai/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["fonts/*.woff2"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
   "icons": {
     "16": "public/icons/icon-128.png",
     "32": "public/icons/icon-128.png",

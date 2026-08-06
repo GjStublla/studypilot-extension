@@ -14,8 +14,6 @@ import {
   Pause,
   Pin,
   Play,
-  Plus,
-  RefreshCw,
   Send,
   Settings,
   ShieldCheck,
@@ -31,21 +29,14 @@ import {
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
-import { findCommittedAssistantForRequest } from './coachingReconciliation';
-import { PerChatSessionSaveQueue } from './sessionSaveQueue';
 import {
   STUDY_FOLDERS,
   type CoachingResponse,
   type ContextShareSettings,
-  type DashboardChatMessage,
-  type DashboardChatSummary,
   type DashboardSaveResult,
-  type DashboardSessionSummary,
   type ExtensionAuthSession,
   type ExtensionAuthState,
-  type LiveTokenResult,
   type PageContext,
-  type SharedChatContext,
   type StudyAction,
   type StudyFolder,
   type StudyPhase,
@@ -55,8 +46,6 @@ import {
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
-const ACADEMIC_INTEGRITY_CONTEXT =
-  'Coach with explanations, questions, study strategies, and revision guidance. Do not write final submission-ready assignment content.';
 
 interface AnswerCard {
   title: string;
@@ -64,25 +53,17 @@ interface AnswerCard {
 }
 
 interface SaveSessionOptions {
-  chatId?: string;
   questionText?: string;
   answerText?: string;
   transcriptSnapshot?: StudyTranscriptTurn[];
   screenshotDataUrl?: string;
-  successNotice?: string;
-  finalize?: boolean;
-}
-
-interface QueuedSessionSave {
-  chatId: string;
-  session: StudySession;
-  finalize: boolean;
   successNotice?: string;
 }
 
 type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
 
 const ACCESS_KEY = 'sp_access_token';
+const REFRESH_KEY = 'sp_refresh_token';
 const USER_ID_KEY = 'sp_user_id';
 const EMAIL_KEY = 'sp_email';
 const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
@@ -90,11 +71,25 @@ const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
 
+  // Extract readable page text for richer AI context.
+  // Strips excess whitespace and caps at 6000 chars to stay within token limits.
+  let pageText: string | undefined;
+  try {
+    const bodyText = document.body?.innerText ?? '';
+    const cleaned = bodyText.replace(/\s{3,}/g, '\n\n').trim();
+    if (cleaned.length > 80) {
+      pageText = cleaned.length > 6000 ? `${cleaned.slice(0, 6000)}…` : cleaned;
+    }
+  } catch {
+    // DOM access can fail in sandboxed iframes — not fatal.
+  }
+
   return {
     sourceUrl: window.location.href,
     sourceTitle: document.title || window.location.hostname || 'Current page',
     host: window.location.hostname.replace(/^www\./, ''),
     selectedText: selectedText ? selectedText.slice(0, 280) : undefined,
+    pageText,
   };
 }
 
@@ -122,6 +117,7 @@ function readDashboardAuthSession(): ExtensionAuthSession | null {
     if (accessToken) {
       return {
         access_token: accessToken,
+        refresh_token: window.localStorage.getItem(REFRESH_KEY) ?? undefined,
         user_id: window.localStorage.getItem(USER_ID_KEY) ?? undefined,
         email: window.localStorage.getItem(EMAIL_KEY),
       };
@@ -169,6 +165,7 @@ function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
   const user = isObject(sessionValue.user) ? sessionValue.user : null;
   return {
     access_token: sessionValue.access_token,
+    refresh_token: typeof sessionValue.refresh_token === 'string' ? sessionValue.refresh_token : undefined,
     user_id: typeof user?.id === 'string' ? user.id : undefined,
     email: typeof user?.email === 'string' ? user.email : null,
     expires_at: typeof sessionValue.expires_at === 'number' ? sessionValue.expires_at : undefined,
@@ -205,19 +202,13 @@ export function FloatingStudyPilot({
   const [phase, setPhase] = useState<StudyPhase>('idle');
   const [notice, setNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
-  const [sharedContext, setSharedContext] = useState<SharedChatContext | null>(null);
-  const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<DashboardChatMessage[]>([]);
-  const [inFlightChatIds, setInFlightChatIds] = useState<Set<string>>(() => new Set());
-  const [isCreatingChat, setIsCreatingChat] = useState(false);
-  const [isRefreshingChats, setIsRefreshingChats] = useState(false);
 
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
   const [lastQuestion, setLastQuestion] = useState('');
   const [card, setCard] = useState<AnswerCard>({
     title: 'Ready to coach',
-    body: 'Ask about the page, summarize the material, or save a coaching session once the extension is connected to your StudyPilot account.',
+    body: 'Ask about this page, summarize it, or save a session once the extension is connected.',
   });
   const [cardOpen, setCardOpen] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -237,19 +228,17 @@ export function FloatingStudyPilot({
   });
 
   const noticeTimer = useRef<number | undefined>(undefined);
-  const activeChatIdRef = useRef<string | null>(null);
-  const inFlightChatIdsRef = useRef<Set<string>>(new Set());
-  const isSavingRef = useRef(false);
-  const sessionSaveQueueRef = useRef<PerChatSessionSaveQueue<QueuedSessionSave> | null>(null);
-  const refreshSequenceRef = useRef(0);
-  const creatingChatRef = useRef(false);
+  const sessionStartedAt = useRef(Date.now());
 
-  if (!sessionSaveQueueRef.current) {
-    sessionSaveQueueRef.current = new PerChatSessionSaveQueue(busy => {
-      isSavingRef.current = busy;
-      setIsSaving(busy);
-    });
-  }
+  useEffect(() => {
+    // Preload available voices so getBestVoice() has them ready.
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.addEventListener('voiceschanged', () => {
+        window.speechSynthesis.getVoices(); // triggers caching
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const refreshSelection = () => setPage(getPageContext());
@@ -282,25 +271,25 @@ export function FloatingStudyPilot({
   }, []);
 
   useEffect(() => {
-    if (isOpen) void refreshExtensionWorkspace();
-  }, [isOpen]);
+    if (!isDashboardBridgeOrigin()) return;
+
+    const syncSession = () => {
+      void bridgeDashboardSession();
+    };
+
+    window.addEventListener('focus', syncSession);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') syncSession();
+    });
+
+    return () => {
+      window.removeEventListener('focus', syncSession);
+      document.removeEventListener('visibilitychange', syncSession);
+    };
+  }, []);
 
   useEffect(() => {
-    if (!isOpen) return;
-
-    const refreshWhenFocused = () => {
-      void refreshExtensionWorkspace();
-    };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') refreshWhenFocused();
-    };
-
-    window.addEventListener('focus', refreshWhenFocused);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      window.removeEventListener('focus', refreshWhenFocused);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
+    if (isOpen) void refreshAuthState();
   }, [isOpen]);
 
   useEffect(() => {
@@ -318,12 +307,11 @@ export function FloatingStudyPilot({
     return () => {
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      recognitionRef.current?.stop();
     };
   }, []);
 
-  const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
-  const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
-  const orbState: OrbState = isActiveChatSending || phase === 'thinking'
+  const orbState: OrbState = phase === 'thinking'
     ? 'thinking'
     : paused
       ? 'paused'
@@ -334,8 +322,8 @@ export function FloatingStudyPilot({
   const statusText = notice
     ? notice
     : authState?.connected === false
-      ? 'Connect dashboard'
-    : isActiveChatSending || phase === 'thinking'
+      ? 'Connect in the web app'
+    : phase === 'thinking'
       ? 'Thinking...'
       : paused
         ? 'Paused'
@@ -354,6 +342,10 @@ export function FloatingStudyPilot({
     noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
   }
 
+  function elapsedSeconds() {
+    return Math.max(0, Math.round((Date.now() - sessionStartedAt.current) / 1000));
+  }
+
   async function refreshAuthState() {
     try {
       const response = await sendRuntimeMessage<ExtensionAuthState>({
@@ -368,187 +360,6 @@ export function FloatingStudyPilot({
     }
   }
 
-  async function refreshExtensionWorkspace() {
-    await bridgeDashboardSession();
-    await Promise.all([
-      refreshAuthState(),
-      refreshSharedChatContext(),
-    ]);
-  }
-
-  async function refreshSharedChatContext(preferredChatId?: string | null) {
-    const refreshSequence = ++refreshSequenceRef.current;
-    setIsRefreshingChats(true);
-
-    try {
-      const response = await sendRuntimeMessage<SharedChatContext>({
-        type: 'STUDYPILOT_GET_SHARED_CONTEXT',
-      });
-      if (!response || refreshSequence !== refreshSequenceRef.current) return;
-
-      setSharedContext(response);
-      const requestedChatId = preferredChatId ?? response.activeChatId;
-      const nextChatId = requestedChatId && response.chats.some(chat => chat.id === requestedChatId)
-        ? requestedChatId
-        : null;
-      if (activeChatIdRef.current !== nextChatId) {
-        setQuestion('');
-        setLastQuestion('');
-      }
-      activeChatIdRef.current = nextChatId;
-      setActiveChatId(nextChatId);
-
-      if (nextChatId) {
-        await loadCanonicalChat(nextChatId, refreshSequence);
-      } else {
-        setChatMessages([]);
-        setTranscript([]);
-        setLastScreenshotDataUrl(null);
-        setCardScreenshotDataUrl(null);
-        setCard({
-          title: 'New conversation',
-          body: 'Ask about this page to start a shared StudyPilot chat.',
-        });
-        setPhase('idle');
-      }
-    } catch (error) {
-      if (refreshSequence !== refreshSequenceRef.current) return;
-      if (isExtensionRuntime()) {
-        const message = error instanceof Error ? error.message : 'Could not load StudyPilot chats.';
-        flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not refresh chats', 2800);
-      }
-    } finally {
-      if (refreshSequence === refreshSequenceRef.current) setIsRefreshingChats(false);
-    }
-  }
-
-  async function loadCanonicalChat(
-    chatId: string,
-    refreshSequence = ++refreshSequenceRef.current,
-  ): Promise<DashboardChatMessage[]> {
-    const messages = await sendRuntimeMessage<DashboardChatMessage[]>({
-      type: 'STUDYPILOT_GET_CHAT_MESSAGES',
-      payload: { chatId },
-    });
-    const canonicalMessages = messages ?? [];
-
-    if (
-      refreshSequence === refreshSequenceRef.current
-      && activeChatIdRef.current === chatId
-    ) {
-      applyCanonicalMessages(canonicalMessages);
-    }
-    return canonicalMessages;
-  }
-
-  function applyCanonicalMessages(messages: DashboardChatMessage[]) {
-    const visibleMessages = messages.filter(message => message.role !== 'system');
-    setChatMessages(visibleMessages);
-    const canonicalTranscript = visibleMessages.map((message, index) =>
-      transcriptTurnFromMessage(message, index));
-    setTranscript(canonicalTranscript);
-
-    const latestAi = [...visibleMessages].reverse().find(message => message.role === 'ai');
-    const latestUser = [...visibleMessages].reverse().find(message => message.role === 'user');
-    setLastQuestion(latestUser?.text ?? '');
-    if (latestAi) {
-      setCard({ title: 'Coach response', body: latestAi.text });
-      setCardOpen(true);
-      setPhase('answer');
-    } else if (latestUser) {
-      setCard({
-        title: 'Question saved',
-        body: 'This shared chat does not have a coach response yet.',
-      });
-      setCardOpen(true);
-      setPhase('answer');
-    } else if (visibleMessages.length === 0) {
-      setCard({
-        title: 'New conversation',
-        body: 'Ask about this page to start a shared StudyPilot chat.',
-      });
-      setPhase('idle');
-    }
-  }
-
-  async function selectDashboardChat(chatId: string | null) {
-    const refreshSequence = ++refreshSequenceRef.current;
-    activeChatIdRef.current = chatId;
-    setActiveChatId(chatId);
-    setQuestion('');
-    setLastQuestion('');
-    setChatMessages([]);
-    setTranscript([]);
-    setLastScreenshotDataUrl(null);
-    setCardScreenshotDataUrl(null);
-    setPhase('idle');
-
-    if (!chatId) {
-      setCard({
-        title: 'New conversation',
-        body: 'Ask about this page to start a shared StudyPilot chat.',
-      });
-    } else {
-      setCard({
-        title: 'Loading conversation',
-        body: 'Fetching the latest shared chat history.',
-      });
-    }
-
-    try {
-      await sendRuntimeMessage<{ selected: true }>({
-        type: 'STUDYPILOT_SELECT_CHAT',
-        payload: { chatId },
-      });
-      if (chatId) await loadCanonicalChat(chatId, refreshSequence);
-    } catch {
-      if (refreshSequence === refreshSequenceRef.current) {
-        flashNotice('Could not open that chat', 2600);
-      }
-    }
-  }
-
-  async function createNewDashboardChat(title = 'New chat') {
-    if (creatingChatRef.current) return null;
-    creatingChatRef.current = true;
-    setIsCreatingChat(true);
-
-    try {
-      const chat = await sendRuntimeMessage<DashboardChatSummary>({
-        type: 'STUDYPILOT_CREATE_CHAT',
-        payload: { title },
-      });
-      if (!chat) return null;
-
-      setSharedContext(previous => previous
-        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
-        : previous);
-      await selectDashboardChat(chat.id);
-      return chat;
-    } finally {
-      creatingChatRef.current = false;
-      setIsCreatingChat(false);
-    }
-  }
-
-  async function continueDashboardSession(session: DashboardSessionSummary) {
-    try {
-      const chat = await sendRuntimeMessage<DashboardChatSummary>({
-        type: 'STUDYPILOT_CONTINUE_SESSION',
-        payload: { sessionId: session.id, title: session.title },
-      });
-      if (!chat) return;
-
-      setSharedContext(previous => previous
-        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
-        : previous);
-      await selectDashboardChat(chat.id);
-      flashNotice(`Continuing ${session.title}`, 2200);
-    } catch {
-      flashNotice('Could not continue that session', 2800);
-    }
-  }
-
   async function bridgeDashboardSession() {
     const dashboardSession = readDashboardAuthSession();
     if (!dashboardSession) return;
@@ -560,44 +371,24 @@ export function FloatingStudyPilot({
       });
       if (response?.connected) {
         setAuthState(response);
+        flashNotice('Extension connected', 2400);
       }
     } catch {
       // The normal auth-status request below will expose the usable state.
     }
   }
 
-  async function runStudyAction(action: StudyAction, customQuestion?: string) {
+  async function runStudyAction(action: StudyAction, customQuestion?: string, autoSpeak = false) {
     const prompt = customQuestion?.trim();
     const studentText = prompt || defaultPromptForAction(action);
-    let chatId = activeChatIdRef.current;
-    if (!chatId && creatingChatRef.current) return;
+    const priorTranscript = transcript;
+    const userTurn: StudyTranscriptTurn = {
+      role: 'user',
+      text: studentText,
+      atSeconds: elapsedSeconds(),
+    };
 
-    if (!chatId) {
-      try {
-        const created = await createNewDashboardChat(chatTitleFromPrompt(studentText, page.sourceTitle));
-        chatId = created?.id ?? null;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Could not create a shared chat.';
-        setCard({ title: 'Chat unavailable', body: message });
-        setCardOpen(true);
-        setPhase('answer');
-        return;
-      }
-    }
-
-    if (!chatId) {
-      setCard({ title: 'Extension runtime required', body: LOCAL_PREVIEW_TEXT });
-      setCardOpen(true);
-      setPhase('answer');
-      flashNotice('Preview mode');
-      return;
-    }
-    if (inFlightChatIdsRef.current.has(chatId)) return;
-
-    const requestId = crypto.randomUUID();
-    setChatInFlight(chatId, true);
-
-    if (activeChatIdRef.current === chatId) setPhase('thinking');
+    setPhase('thinking');
     setFeedback(null);
     setCopied(false);
     setLastQuestion(studentText);
@@ -609,23 +400,12 @@ export function FloatingStudyPilot({
         payload: {
           action,
           question: prompt,
-          userMessage: studentText,
-          chatId,
-          requestId,
-          originSurface: 'extension',
           page,
           context,
-          clientContext: {
-            page: {
-              title: page.sourceTitle || page.host || 'Current page',
-              ...(context.pageUrl && page.sourceUrl ? { url: page.sourceUrl } : {}),
-            },
-            action,
-            ...(context.selectedText && page.selectedText
-              ? { selection: page.selectedText }
-              : {}),
-            integrity: ACADEMIC_INTEGRITY_CONTEXT,
-          },
+          history: priorTranscript.slice(-12).map(turn => ({
+            role: turn.role,
+            text: turn.text,
+          })),
         },
       });
 
@@ -646,38 +426,36 @@ export function FloatingStudyPilot({
 
       const responseText = response.text.trim();
       const screenshotDataUrl = response.screenshotDataUrl ?? null;
-      const refreshSequence = activeChatIdRef.current === chatId
-        ? ++refreshSequenceRef.current
-        : -1;
-      let canonicalMessages: DashboardChatMessage[] = [];
-      let canonicalRefreshSucceeded = true;
-      try {
-        canonicalMessages = await loadCanonicalChat(chatId, refreshSequence);
-      } catch {
-        canonicalRefreshSucceeded = false;
-      }
-      const nextTranscript = canonicalMessages
-        .filter(message => message.role !== 'system')
-        .map((message, index) => transcriptTurnFromMessage(message, index));
+      const aiTurn: StudyTranscriptTurn = {
+        role: 'ai',
+        text: responseText,
+        atSeconds: Math.max(userTurn.atSeconds + 1, elapsedSeconds()),
+      };
+      const nextTranscript = [...priorTranscript, userTurn, aiTurn];
 
-      if (activeChatIdRef.current === chatId) {
-        if (screenshotDataUrl) setLastScreenshotDataUrl(screenshotDataUrl);
-        setCardScreenshotDataUrl(screenshotDataUrl);
-        setCard({
-          title: response.title || titleForAction(action, prompt),
-          body: responseText,
-        });
-        setCardOpen(true);
-        setPhase('answer');
-        flashNotice(
-          canonicalRefreshSucceeded ? 'Coach response ready' : 'Response saved; history refresh pending',
-          canonicalRefreshSucceeded ? 2200 : 3000,
-        );
+      setTranscript(nextTranscript);
+      if (screenshotDataUrl) setLastScreenshotDataUrl(screenshotDataUrl);
+      setCardScreenshotDataUrl(screenshotDataUrl);
+      setCard({
+        title: response.title || titleForAction(action, prompt),
+        body: responseText,
+      });
+      setCardOpen(true);
+      setPhase('answer');
+      flashNotice('Coach response ready');
+      if (autoSpeak) {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const utterance = makeSpeechUtterance(responseText);
+          utterance.onstart = () => setIsSpeaking(true);
+          utterance.onend = () => setIsSpeaking(false);
+          utterance.onerror = () => setIsSpeaking(false);
+          window.speechSynthesis.speak(utterance);
+        }
       }
       await refreshAuthState();
-      if (context.saveToDashboard && nextTranscript.length > 0) {
+      if (context.saveToDashboard) {
         void persistSessionToDashboard({
-          chatId,
           questionText: studentText,
           answerText: responseText,
           transcriptSnapshot: nextTranscript,
@@ -687,78 +465,18 @@ export function FloatingStudyPilot({
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'StudyPilot AI could not respond.';
-      const errorCard: AnswerCard = {
+      setCard({
         title: message.includes('connected') || message.includes('signed') || message.includes('session')
           ? 'Connect StudyPilot'
           : 'Coach unavailable',
         body: message.includes('StudyPilot is not connected')
           ? STUDYPILOT_CONNECT_MESSAGE
           : message,
-      };
-      const refreshSequence = activeChatIdRef.current === chatId
-        ? ++refreshSequenceRef.current
-        : -1;
-      let canonicalMessages: DashboardChatMessage[] = [];
-
-      try {
-        canonicalMessages = await loadCanonicalChat(chatId, refreshSequence);
-      } catch {
-        // The coaching error remains the primary failure shown to the user.
-      }
-
-      const committedAssistant = findCommittedAssistantForRequest(canonicalMessages, requestId);
-      if (committedAssistant) {
-        const responseText = committedAssistant.text.trim();
-        const nextTranscript = canonicalMessages
-          .filter(canonicalMessage => canonicalMessage.role !== 'system')
-          .map((canonicalMessage, index) => transcriptTurnFromMessage(canonicalMessage, index));
-
-        if (
-          activeChatIdRef.current === chatId
-          && refreshSequence === refreshSequenceRef.current
-        ) {
-          setCard({
-            title: titleForAction(action, prompt),
-            body: responseText,
-          });
-          setCardOpen(true);
-          setPhase('answer');
-          flashNotice('Coach response restored', 2200);
-        }
-
-        await refreshAuthState();
-        if (context.saveToDashboard && nextTranscript.length > 0) {
-          void persistSessionToDashboard({
-            chatId,
-            questionText: studentText,
-            answerText: responseText,
-            transcriptSnapshot: nextTranscript,
-            successNotice: 'Saved to StudyPilot',
-          });
-        }
-        return;
-      }
-
-      if (
-        activeChatIdRef.current === chatId
-        && refreshSequence === refreshSequenceRef.current
-      ) {
-        setCard(errorCard);
-        setCardOpen(true);
-        setPhase('answer');
-        flashNotice('Could not reach StudyPilot AI', 3000);
-      }
-    } finally {
-      setChatInFlight(chatId, false);
+      });
+      setCardOpen(true);
+      setPhase('answer');
+      flashNotice('Could not reach StudyPilot AI', 3000);
     }
-  }
-
-  function setChatInFlight(chatId: string, isInFlight: boolean) {
-    const next = new Set(inFlightChatIdsRef.current);
-    if (isInFlight) next.add(chatId);
-    else next.delete(chatId);
-    inFlightChatIdsRef.current = next;
-    setInFlightChatIds(next);
   }
 
   function handleSubmit() {
@@ -769,65 +487,34 @@ export function FloatingStudyPilot({
   }
 
   async function saveToDashboard() {
-    if (isSavingRef.current) return;
-
-    try {
-      await persistSessionToDashboard({ finalize: true });
-    } catch {
-      flashNotice('Could not save right now', 2800);
-    }
+    await persistSessionToDashboard();
   }
 
   async function persistSessionToDashboard(options: SaveSessionOptions = {}) {
-    let targetChatId = options.chatId ?? activeChatIdRef.current;
-    if (!targetChatId) {
-      const created = await createNewDashboardChat(
-        chatTitleFromPrompt(options.questionText ?? lastQuestion, page.sourceTitle),
-      );
-      targetChatId = created?.id ?? null;
-    }
-    if (!targetChatId) return;
+    if (isSaving) return;
+
+    setIsSaving(true);
     const questionText = options.questionText ?? (lastQuestion || card.title);
     const answerText = options.answerText ?? card.body;
-    const transcriptSnapshot = options.transcriptSnapshot ?? transcript;
-    const chat = sharedContext?.chats.find(item => item.id === targetChatId) ?? null;
+    const transcriptSnapshot = options.transcriptSnapshot ?? (transcript.length > 0
+      ? transcript
+      : fallbackTranscript(questionText, answerText));
     const session = createStudySession({
-      id: targetChatId,
       page,
       folder: context.folder,
       question: questionText,
       answer: answerText,
-      transcript: [...transcriptSnapshot],
+      transcript: transcriptSnapshot,
       screenshotDataUrl:
         options.screenshotDataUrl ??
         (context.screenshot ? lastScreenshotDataUrl ?? undefined : undefined),
       tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
-      remoteSessionId: chat?.sessionId ?? targetChatId,
-      createdAt: chat?.createdAt,
     });
-
-    const save: QueuedSessionSave = {
-      chatId: targetChatId,
-      session,
-      finalize: options.finalize ?? false,
-      successNotice: options.successNotice,
-    };
-    const saveQueue = sessionSaveQueueRef.current;
-    if (!saveQueue) throw new Error('StudyPilot session save queue is unavailable.');
-    await saveQueue.enqueue(save, executeSessionSave);
-  }
-
-  async function executeSessionSave(save: QueuedSessionSave) {
-    const { chatId: targetChatId, session } = save;
 
     try {
       const response = await sendRuntimeMessage<DashboardSaveResult>({
         type: 'STUDYPILOT_SAVE_SESSION',
-        payload: {
-          chatId: targetChatId,
-          session,
-          finalize: save.finalize,
-        },
+        payload: { session },
       });
 
       if (!response) {
@@ -841,45 +528,27 @@ export function FloatingStudyPilot({
         return;
       }
 
-      if (activeChatIdRef.current === targetChatId) {
-        setPhase('saved');
-        flashNotice(
-          response?.warning
-            ? 'Saved; summary pending'
-            : (save.successNotice ?? (save.finalize ? 'Session saved and finalized' : `Saved to ${session.folder}`)),
-          2600,
-        );
-      }
-      if (response.remoteSessionId) {
-        setSharedContext(previous => previous
-          ? {
-              ...previous,
-              chats: previous.chats.map(item => item.id === targetChatId
-                ? { ...item, sessionId: response.remoteSessionId ?? item.sessionId }
-                : item),
-            }
-          : previous);
-      }
+      setPhase('saved');
+      flashNotice(
+        response?.warning ? 'Saved; summary pending' : (options.successNotice ?? `Saved to ${session.folder}`),
+        2600,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Could not save right now';
-      if (activeChatIdRef.current === targetChatId) {
-        flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not save right now');
-      }
+      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not save right now');
+    } finally {
+      setIsSaving(false);
     }
   }
 
   async function openDashboard() {
-    const base = DASHBOARD_URL.split('#')[0];
-    const dashboardUrl = activeChatIdRef.current
-      ? `${base}#dashboard?chat=${encodeURIComponent(activeChatIdRef.current)}`
-      : `${base}#dashboard`;
     try {
       await sendRuntimeMessage({
         type: 'STUDYPILOT_OPEN_DASHBOARD',
-        payload: { url: dashboardUrl },
+        payload: { url: DASHBOARD_URL },
       });
     } catch {
-      window.open(dashboardUrl, '_blank', 'noopener,noreferrer');
+      window.open(DASHBOARD_URL, '_blank', 'noopener,noreferrer');
     }
   }
 
@@ -911,8 +580,7 @@ export function FloatingStudyPilot({
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(card.body);
-    utterance.rate = 1.02;
+    const utterance = makeSpeechUtterance(card.body);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.cancel();
@@ -937,39 +605,65 @@ export function FloatingStudyPilot({
     window.setTimeout(() => setCopied(false), 1600);
   }
 
+  // Web Speech API recognition instance — kept in a ref so start/stop
+  // work across renders without creating multiple instances.
+  const recognitionRef = useRef<any>(null);
+
   function toggleMic() {
-    setMicOn(value => {
-      const next = !value;
-      if (next) {
-        setPaused(false);
-        void requestLiveAccess();
-      }
-      return next;
-    });
-  }
-
-  async function requestLiveAccess() {
-    try {
-      const response = await sendRuntimeMessage<LiveTokenResult>({
-        type: 'STUDYPILOT_GET_LIVE_TOKEN',
-      });
-
-      if (!response) {
-        setMicOn(false);
-        flashNotice('Open the extension build for live coach');
-        return;
-      }
-
-      if (response.status === 'stub' || response.status === 'fallback') {
-        setMicOn(false);
-      }
-
-      flashNotice(response.message, 3600);
-      await refreshAuthState();
-    } catch (error) {
+    if (micOn) {
+      // Stop listening
+      recognitionRef.current?.stop();
       setMicOn(false);
-      const message = error instanceof Error ? error.message : 'Live coach unavailable';
-      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      flashNotice('Voice input is not supported in this browser.', 3000);
+      return;
+    }
+
+    const recognition: any = new SpeechRecognition();
+    recognition.continuous = false;      // stop after first utterance
+    recognition.interimResults = false;  // only final results
+    recognition.lang = 'en-US';
+
+    recognition.onstart = () => {
+      setMicOn(true);
+      setPaused(false);
+      flashNotice('Listening…', 8000);
+    };
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setMicOn(false);
+        flashNotice(`"${transcript.slice(0, 40)}${transcript.length > 40 ? '…' : ''}"`, 2000);
+        void runStudyAction('explain', transcript, true);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      setMicOn(false);
+      if (event.error === 'not-allowed') {
+        flashNotice('Microphone access denied. Allow it in Chrome settings.', 4000);
+      } else if (event.error !== 'no-speech') {
+        flashNotice('Voice input failed. Try again.', 3000);
+      }
+    };
+
+    recognition.onend = () => {
+      setMicOn(false);
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      flashNotice('Could not start voice input. Try again.', 3000);
+      setMicOn(false);
     }
   }
 
@@ -1066,7 +760,6 @@ export function FloatingStudyPilot({
                       <MenuItem
                         icon={<BookmarkCheck size={16} />}
                         label={isSaving ? 'Saving…' : 'Save to dashboard'}
-                        disabled={isSaving}
                         onClick={() => {
                           setMenuOpen(false);
                           void saveToDashboard();
@@ -1103,45 +796,15 @@ export function FloatingStudyPilot({
                 show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
               }}
             >
-              <motion.section className="sp-chat-switcher" variants={sectionReveal}>
-                <label className="sp-chat-select">
-                  <span>Shared chat</span>
-                  <select
-                    aria-label="Shared StudyPilot chat"
-                    value={activeChatId ?? ''}
-                    onChange={event => void selectDashboardChat(event.target.value || null)}
-                  >
-                    <option value="">New chat draft</option>
-                    {(sharedContext?.chats ?? []).map(chat => (
-                      <option key={chat.id} value={chat.id}>{chat.title}</option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className="sp-chat-tool"
-                  aria-label="Create new chat"
-                  title="New chat"
-                  disabled={isCreatingChat}
-                  onClick={() => {
-                    void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
-                  }}
+              {/* Show a web-app connect prompt when no session is available */}
+              {authState?.connected === false ? (
+                <WebAppConnectView onOpenDashboard={() => void openDashboard()} />
+              ) : (
+              <><motion.section
+                  className="sp-stage"
+                  variants={sectionReveal}
+                  aria-live="polite"
                 >
-                  <Plus size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="sp-chat-tool"
-                  aria-label="Refresh shared chats"
-                  title="Refresh chats"
-                  disabled={isRefreshingChats}
-                  onClick={() => void refreshSharedChatContext(activeChatIdRef.current)}
-                >
-                  <RefreshCw size={15} data-spinning={isRefreshingChats} />
-                </button>
-              </motion.section>
-
-              <motion.section className="sp-stage" variants={sectionReveal} aria-live="polite">
                 <span className="sp-presence-dot" aria-hidden="true" />
                 <Orb state={orbState} />
                 <p className="sp-status" data-state={orbState}>
@@ -1196,9 +859,6 @@ export function FloatingStudyPilot({
                       page={page}
                       context={context}
                       onChange={setContext}
-                      sessions={sharedContext?.sessions ?? []}
-                      activeSessionId={activeChat?.sessionId ?? null}
-                      onContinueSession={session => void continueDashboardSession(session)}
                       onOpenDashboard={() => void openDashboard()}
                     />
                   </motion.div>
@@ -1211,7 +871,6 @@ export function FloatingStudyPilot({
                   value={question}
                   placeholder="Ask a question or say something..."
                   aria-label="Ask a question"
-                  disabled={isActiveChatSending || isCreatingChat}
                   onChange={event => setQuestion(event.target.value)}
                   onKeyDown={event => {
                     if (event.key === 'Enter') {
@@ -1225,48 +884,31 @@ export function FloatingStudyPilot({
                   className="sp-send"
                   aria-label="Send question"
                   onClick={handleSubmit}
-                  disabled={!question.trim() || isActiveChatSending || isCreatingChat}
+                  disabled={!question.trim()}
                 >
                   <Send size={17} strokeWidth={2} fill="currentColor" />
                 </button>
               </motion.div>
 
               <motion.div className="sp-chips" variants={sectionReveal}>
-                <QuickChip label="Summarize" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('summarize')}>
+                <QuickChip label="Summarize" onClick={() => void runStudyAction('summarize')}>
                   <SummarizeGlyph />
                 </QuickChip>
-                <QuickChip label="Explain" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('explain')}>
+                <QuickChip label="Explain" onClick={() => void runStudyAction('explain')}>
                   <ExplainGlyph />
                 </QuickChip>
-                <QuickChip label="Quiz Me" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('quiz')}>
+                <QuickChip label="Quiz Me" onClick={() => void runStudyAction('quiz')}>
                   <QuizGlyph />
                 </QuickChip>
-                <QuickChip label="Flashcards" disabled={isActiveChatSending || isCreatingChat} onClick={() => void runStudyAction('flashcards')}>
+                <QuickChip label="Flashcards" onClick={() => void runStudyAction('flashcards')}>
                   <FlashcardsGlyph />
                 </QuickChip>
               </motion.div>
 
-              {activeChat && chatMessages.length > 0 ? (
-                <motion.section className="sp-chat-history" variants={sectionReveal} aria-label="Shared chat history">
-                  <div className="sp-chat-history-head">
-                    <strong>{activeChat.title}</strong>
-                    <span>{chatMessages.length} messages</span>
-                  </div>
-                  <div className="sp-chat-history-list">
-                    {chatMessages.slice(-10).map(message => (
-                      <article key={message.id} data-role={message.role}>
-                        <span>{message.role === 'user' ? 'You' : 'Coach'}</span>
-                        <p>{message.text}</p>
-                      </article>
-                    ))}
-                  </div>
-                </motion.section>
-              ) : null}
-
               <motion.section
                 className="sp-card"
                 variants={sectionReveal}
-                data-thinking={isActiveChatSending || phase === 'thinking'}
+                data-thinking={phase === 'thinking'}
               >
                 <button
                   type="button"
@@ -1346,8 +988,11 @@ export function FloatingStudyPilot({
                   ) : null}
                 </AnimatePresence>
               </motion.section>
-            </motion.div>
-
+              </>
+            )}  
+            </motion.div>{/* end sp-body */}
+ 
+          
             <footer className="sp-footer">
               <button
                 type="button"
@@ -1430,22 +1075,14 @@ function RoundButton({
 function MenuItem({
   icon,
   label,
-  disabled,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
-  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className="sp-menu-item"
-      role="menuitem"
-      disabled={disabled}
-      onClick={onClick}
-    >
+    <button type="button" className="sp-menu-item" role="menuitem" onClick={onClick}>
       {icon}
       <span>{label}</span>
     </button>
@@ -1454,17 +1091,15 @@ function MenuItem({
 
 function QuickChip({
   label,
-  disabled,
   onClick,
   children,
 }: {
   label: string;
-  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
   return (
-    <button type="button" className="sp-chip" disabled={disabled} onClick={onClick}>
+    <button type="button" className="sp-chip" onClick={onClick}>
       {children}
       <span>{label}</span>
     </button>
@@ -1475,17 +1110,11 @@ function SettingsSheet({
   page,
   context,
   onChange,
-  sessions,
-  activeSessionId,
-  onContinueSession,
   onOpenDashboard,
 }: {
   page: PageContext;
   context: ContextShareSettings;
   onChange: Dispatch<SetStateAction<ContextShareSettings>>;
-  sessions: DashboardSessionSummary[];
-  activeSessionId: string | null;
-  onContinueSession: (session: DashboardSessionSummary) => void;
   onOpenDashboard: () => void;
 }) {
   const setFlag =
@@ -1553,21 +1182,6 @@ function SettingsSheet({
           <span>Dashboard</span>
         </button>
       </div>
-      <label className="sp-session-select">
-        <span>Continue session</span>
-        <select
-          value={activeSessionId ?? ''}
-          onChange={event => {
-            const session = sessions.find(item => item.id === event.target.value);
-            if (session) onContinueSession(session);
-          }}
-        >
-          <option value="">Choose a dashboard session</option>
-          {sessions.map(session => (
-            <option key={session.id} value={session.id}>{session.title}</option>
-          ))}
-        </select>
-      </label>
     </section>
   );
 }
@@ -1682,7 +1296,6 @@ function FlashcardsGlyph() {
 }
 
 interface StudySessionInput {
-  id: string;
   page: PageContext;
   folder: StudyFolder;
   question: string;
@@ -1691,8 +1304,6 @@ interface StudySessionInput {
   screenshotDataUrl?: string;
   screenshotUrl?: string;
   tags?: string[];
-  remoteSessionId?: string;
-  createdAt?: string;
 }
 
 function createStudySession(input: StudySessionInput): StudySession {
@@ -1702,7 +1313,7 @@ function createStudySession(input: StudySessionInput): StudySession {
       : 0;
 
   return {
-    id: input.id,
+    id: crypto.randomUUID?.() ?? `study_${Date.now().toString(36)}`,
     title: input.page.sourceTitle || 'StudyPilot session',
     sourceUrl: input.page.sourceUrl,
     sourceTitle: input.page.sourceTitle || input.page.host,
@@ -1714,27 +1325,72 @@ function createStudySession(input: StudySessionInput): StudySession {
     folder: input.folder,
     mode: 'Study Coach',
     durationSeconds,
-    remoteSessionId: input.remoteSessionId,
-    createdAt: input.createdAt ?? new Date().toISOString(),
+    createdAt: new Date().toISOString(),
     tags: input.tags ?? ['screen-help', 'saved-explanation'],
   };
 }
 
-function transcriptTurnFromMessage(
-  message: DashboardChatMessage,
-  index: number,
-): StudyTranscriptTurn {
-  return {
-    id: message.id,
-    role: message.role,
-    text: message.text,
-    atSeconds: Math.max(0, index),
-    sequence: message.sequence,
-    createdAt: message.createdAt,
-  };
+/**
+ * Pick the best available speech synthesis voice.
+ * Prefers Google's neural voices, then falls back to any English voice.
+ */
+function getBestVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  const googleNeural = voices.find(v =>
+    v.name.includes('Google') && v.lang.startsWith('en')
+  );
+  if (googleNeural) return googleNeural;
+
+  const english = voices.find(v => v.lang.startsWith('en-US'));
+  return english ?? voices[0] ?? null;
 }
 
-function chatTitleFromPrompt(prompt: string, fallback: string): string {
-  const normalized = prompt.trim().replace(/\s+/g, ' ');
-  return (normalized || fallback || 'New chat').slice(0, 64);
+function makeSpeechUtterance(text: string): SpeechSynthesisUtterance {
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.05;
+  utterance.pitch = 1.0;
+  utterance.volume = 1.0;
+  const voice = getBestVoice();
+  if (voice) utterance.voice = voice;
+  return utterance;
+}
+
+function fallbackTranscript(question: string, answer: string): StudyTranscriptTurn[] {
+  const turns: StudyTranscriptTurn[] = [
+    { role: 'user', text: question, atSeconds: 0 },
+    { role: 'ai', text: answer, atSeconds: 1 },
+  ];
+
+  return turns.filter(turn => turn.text.trim().length > 0);
+}
+
+/* ============================================================================
+   WebAppConnectView — shown when the extension has no stored session.
+   Directs users to the StudyPilot web app, where the extension can connect
+   automatically once the browser session is available.
+   ============================================================================ */
+
+function WebAppConnectView({
+  onOpenDashboard,
+}: {
+  onOpenDashboard: () => void;
+}) {
+  return (
+    <div className="sp-login">
+      <div className="sp-login-brand">
+        <SparkleLogo size={28} />
+        <span>Connect StudyPilot</span>
+      </div>
+      <div className="sp-login-form">
+        <p className="sp-login-error" style={{ margin: 0 }}>
+          Open the StudyPilot web app, sign in, and this extension will connect automatically.
+        </p>
+        <button type="button" className="sp-login-btn" onClick={onOpenDashboard}>
+          Open web app
+        </button>
+      </div>
+    </div>
+  );
 }
