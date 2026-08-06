@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  AlignLeft,
   ArrowLeft,
   BookmarkCheck,
   Camera,
@@ -11,6 +12,9 @@ import {
   Crown,
   ExternalLink,
   Headphones,
+  HelpCircle,
+  Layers,
+  Lightbulb,
   Mic,
   MicOff,
   Minus,
@@ -255,6 +259,129 @@ export function FloatingStudyPilot({
     saveToDashboard: true,
     folder: 'Biology 101',
   });
+
+  // ── Drag-to-reposition ───────────────────────────────────────────────────────
+  // null = use default CSS (bottom-right). Once the user drags, we switch to
+  // explicit left/top so the panel can live anywhere on screen.
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const dragStart = useRef<{ px: number; py: number; ex: number; ey: number } | null>(null);
+  const isDragging = useRef(false);
+
+  // Resize state — null = use default CSS dimensions
+  const MIN_W = 300; const MAX_W = 600;
+  const MIN_H = 480; const MAX_H = 860;
+  const [panelSize, setPanelSize] = useState<{ w: number; h: number } | null>(null);
+  const resizeStart = useRef<{ px: number; py: number; w: number; h: number } | null>(null);
+
+  function onResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const panel = e.currentTarget.closest('.sp-panel') as HTMLElement | null;
+    resizeStart.current = {
+      px: e.clientX,
+      py: e.clientY,
+      w: panel?.offsetWidth ?? 390,
+      h: panel?.offsetHeight ?? 680,
+    };
+  }
+
+  function onResizePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizeStart.current) return;
+    const dw = e.clientX - resizeStart.current.px;
+    const dh = e.clientY - resizeStart.current.py;
+    setPanelSize({
+      w: Math.max(MIN_W, Math.min(MAX_W, resizeStart.current.w + dw)),
+      h: Math.max(MIN_H, Math.min(MAX_H, resizeStart.current.h + dh)),
+    });
+  }
+
+  function onResizePointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    resizeStart.current = null;
+  }
+
+  function onHeaderPointerDown(e: React.PointerEvent<HTMLElement>) {
+    // Only drag on primary button; ignore clicks on interactive children
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button')) return;
+
+    e.currentTarget.setPointerCapture(e.pointerId);
+    isDragging.current = false;
+
+    // Current panel top-left in viewport coords
+    const panel = e.currentTarget.closest('.sp-panel') as HTMLElement | null;
+    const rect = panel?.getBoundingClientRect() ?? { left: 0, top: 0 };
+
+    dragStart.current = {
+      px: e.clientX,
+      py: e.clientY,
+      ex: rect.left,
+      ey: rect.top,
+    };
+  }
+
+  function onHeaderPointerMove(e: React.PointerEvent<HTMLElement>) {
+    if (!dragStart.current) return;
+
+    const dx = e.clientX - dragStart.current.px;
+    const dy = e.clientY - dragStart.current.py;
+
+    if (!isDragging.current && Math.hypot(dx, dy) < 4) return;
+    isDragging.current = true;
+
+    const panelW = (e.currentTarget.closest('.sp-panel') as HTMLElement | null)?.offsetWidth ?? 400;
+    const panelH = (e.currentTarget.closest('.sp-panel') as HTMLElement | null)?.offsetHeight ?? 700;
+    const margin = 8;
+
+    const rawX = dragStart.current.ex + dx;
+    const rawY = dragStart.current.ey + dy;
+
+    const x = Math.max(margin, Math.min(rawX, window.innerWidth - panelW - margin));
+    const y = Math.max(margin, Math.min(rawY, window.innerHeight - panelH - margin));
+
+    setDragPos({ x, y });
+  }
+
+  function onHeaderPointerUp(e: React.PointerEvent<HTMLElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    dragStart.current = null;
+    // If it was a tiny movement treat it as a click — don't swallow the event
+  }
+
+  // ── Launcher drag (when panel is closed) ─────────────────────────────────
+  const launcherDragStart = useRef<{ px: number; py: number; ex: number; ey: number } | null>(null);
+  const launcherDidDrag = useRef(false);
+
+  function onLauncherPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    launcherDidDrag.current = false;
+    const rect = e.currentTarget.getBoundingClientRect();
+    launcherDragStart.current = { px: e.clientX, py: e.clientY, ex: rect.left, ey: rect.top };
+  }
+
+  function onLauncherPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    if (!launcherDragStart.current) return;
+    const dx = e.clientX - launcherDragStart.current.px;
+    const dy = e.clientY - launcherDragStart.current.py;
+    if (!launcherDidDrag.current && Math.hypot(dx, dy) < 4) return;
+    launcherDidDrag.current = true;
+    e.preventDefault();
+
+    const btnW = e.currentTarget.offsetWidth;
+    const btnH = e.currentTarget.offsetHeight;
+    const margin = 8;
+    const x = Math.max(margin, Math.min(launcherDragStart.current.ex + dx, window.innerWidth - btnW - margin));
+    const y = Math.max(margin, Math.min(launcherDragStart.current.ey + dy, window.innerHeight - btnH - margin));
+    setDragPos({ x, y });
+  }
+
+  function onLauncherPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    launcherDragStart.current = null;
+  }
 
   // Session-scoped chat ID — null until the server assigns one via the first coaching response commit.
   const sessionChatIdRef = useRef<string | null>(null);
@@ -968,7 +1095,10 @@ export function FloatingStudyPilot({
   }
 
   return (
-    <div className="sp-extension">
+    <div
+      className="sp-extension"
+      style={dragPos ? { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' } : undefined}
+    >
       <AnimatePresence>
         {!isOpen ? (
           <motion.button
@@ -977,7 +1107,10 @@ export function FloatingStudyPilot({
             className="sp-launcher"
             aria-label="Open Study Pilot"
             title={`Study Pilot — ask about ${sourceLabel}`}
-            onClick={() => setIsOpen(true)}
+            onClick={() => { if (!launcherDidDrag.current) setIsOpen(true); }}
+            onPointerDown={onLauncherPointerDown}
+            onPointerMove={onLauncherPointerMove}
+            onPointerUp={onLauncherPointerUp}
             initial={{ opacity: 0, scale: 0.8, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.85, y: 8 }}
@@ -1000,17 +1133,33 @@ export function FloatingStudyPilot({
             className="sp-panel"
             role="dialog"
             aria-label="Study Pilot"
+            style={panelSize ? { width: panelSize.w, height: panelSize.h } : undefined}
             initial={{ opacity: 0, y: 26, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.98 }}
             transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
           >
-            <header className="sp-header">
+            <header
+              className="sp-header"
+              onPointerDown={onHeaderPointerDown}
+              onPointerMove={onHeaderPointerMove}
+              onPointerUp={onHeaderPointerUp}
+              data-dragging={isDragging.current}
+            >
               <div className="sp-brand">
                 <SparkleLogo size={30} />
                 <strong>Study Pilot</strong>
               </div>
               <div className="sp-header-actions">
+                <button
+                  type="button"
+                  className="sp-icon-button"
+                  aria-label="Minimize"
+                  title="Minimize"
+                  onClick={() => setIsOpen(false)}
+                >
+                  <Minus size={18} strokeWidth={2} />
+                </button>
                 <button
                   type="button"
                   className="sp-icon-button"
@@ -1121,7 +1270,9 @@ export function FloatingStudyPilot({
                         <span>Back</span>
                       </button>
                       <span className="sp-study-title">
-                        {studyMode === 'flashcards' ? '🃏 Flashcards' : '🧠 Quiz'}
+                        {studyMode === 'flashcards'
+                          ? <><Layers size={15} strokeWidth={2} /> Flashcards</>
+                          : <><HelpCircle size={15} strokeWidth={2} /> Quiz</>}
                       </span>
                       <button
                         type="button"
@@ -1877,55 +2028,33 @@ function SparkleLogo({ size = 28 }: { size?: number }) {
 
 function SummarizeGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect width="18" height="18" rx="4.5" fill="#3d7dfd" />
-      <path
-        d="M5.4 5.6h7.2M5.4 8.6h7.2M5.4 11.6h4.6"
-        stroke="#eaf2ff"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
+    <span className="sp-chip-icon sp-chip-icon--blue" aria-hidden="true">
+      <AlignLeft size={14} strokeWidth={2.2} />
+    </span>
   );
 }
 
 function ExplainGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-      <path
-        d="M9 1.8a5.1 5.1 0 0 0-2.9 9.3c.6.44.9 1.02.9 1.65v.35h4v-.35c0-.63.3-1.21.9-1.65A5.1 5.1 0 0 0 9 1.8Z"
-        stroke="#fbbf24"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path d="M7.2 15.4h3.6" stroke="#fbbf24" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
+    <span className="sp-chip-icon sp-chip-icon--amber" aria-hidden="true">
+      <Lightbulb size={14} strokeWidth={2.2} />
+    </span>
   );
 }
 
 function QuizGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <circle cx="9" cy="9" r="9" fill="#1fbc84" />
-      <path
-        d="M6.9 6.9c.2-1.25 1.16-2 2.3-2 1.26 0 2.2.86 2.2 2 0 1.55-1.85 1.7-2.15 3"
-        stroke="#f2fff9"
-        strokeWidth="1.55"
-        fill="none"
-        strokeLinecap="round"
-      />
-      <circle cx="9.2" cy="12.9" r="0.95" fill="#f2fff9" />
-    </svg>
+    <span className="sp-chip-icon sp-chip-icon--green" aria-hidden="true">
+      <HelpCircle size={14} strokeWidth={2.2} />
+    </span>
   );
 }
 
 function FlashcardsGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect width="18" height="18" rx="4.5" fill="#8b5cf6" />
-      <rect x="6.8" y="4.4" width="6.8" height="8.8" rx="1.4" fill="#efe9ff" opacity="0.55" />
-      <rect x="4.4" y="6" width="6.8" height="8.8" rx="1.4" fill="#f6f2ff" />
-    </svg>
+    <span className="sp-chip-icon sp-chip-icon--violet" aria-hidden="true">
+      <Layers size={14} strokeWidth={2.2} />
+    </span>
   );
 }
 

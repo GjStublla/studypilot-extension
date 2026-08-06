@@ -137,12 +137,12 @@
 
 .sp-panel {
   position: relative;
-  width: min(448px, calc(100vw - 28px));
-  height: min(820px, calc(100vh - 28px));
+  width: min(390px, calc(100vw - 28px));
+  height: min(680px, calc(100vh - 28px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border-radius: 30px;
+  border-radius: 28px;
   color: var(--sp-ink);
   background:
     radial-gradient(130% 58% at 50% 24%, rgba(38, 61, 158, 0.35), transparent 62%),
@@ -171,8 +171,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 20px 18px 10px 22px;
+  gap: 10px;
+  padding: 16px 14px 8px 18px;
+  cursor: grab;
+  user-select: none;
+}
+
+.sp-header[data-dragging="true"] {
+  cursor: grabbing;
 }
 
 .sp-brand {
@@ -189,7 +195,7 @@
 
 .sp-brand strong {
   color: var(--sp-ink);
-  font-size: 23px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -199,6 +205,10 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.sp-header button {
+  cursor: pointer;
 }
 
 .sp-icon-button {
@@ -1129,7 +1139,7 @@
 
   .sp-panel {
     width: calc(100vw - 24px);
-    height: min(760px, calc(100vh - 24px));
+    height: min(640px, calc(100vh - 24px));
   }
 
   .sp-orb {
@@ -1693,8 +1703,12 @@
 }
 
 .sp-study-title {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   color: var(--sp-ink);
-  font-size: 15.5px;
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.01em;
   flex: 1;
