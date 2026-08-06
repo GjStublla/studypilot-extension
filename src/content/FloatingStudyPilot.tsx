@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ArrowLeft,
   BookmarkCheck,
   Camera,
   Check,
@@ -53,7 +54,24 @@ const LOCAL_PREVIEW_TEXT =
 interface AnswerCard {
   title: string;
   body: string;
+  action?: StudyAction;
 }
+
+interface FlashcardItem {
+  q: string;
+  a: string;
+}
+
+interface QuizItem {
+  question: string;
+  options: string[];
+  answer: number; // index into options
+}
+
+type StructuredCard =
+  | { type: 'flashcards'; items: FlashcardItem[] }
+  | { type: 'quiz'; items: QuizItem[] }
+  | null;
 
 interface SaveSessionOptions {
   questionText?: string;
@@ -220,6 +238,12 @@ export function FloatingStudyPilot({
   const [isSaving, setIsSaving] = useState(false);
   const [transcript, setTranscript] = useState<StudyTranscriptTurn[]>([]);
   const [cardScreenshotDataUrl, setCardScreenshotDataUrl] = useState<string | null>(null);
+  // Parsed structured content for flashcard/quiz UIs
+  const [structuredCard, setStructuredCard] = useState<StructuredCard>(null);
+  // When set, the full panel switches to dedicated study mode
+  const [studyMode, setStudyMode] = useState<'flashcards' | 'quiz' | null>(null);
+  const [studyLoading, setStudyLoading] = useState(false);
+  const [studyError, setStudyError] = useState<string | null>(null);
   // Screenshots attached to the *next* message the user will send
   const [pendingScreenshots, setPendingScreenshots] = useState<string[]>([]);
 
@@ -402,6 +426,7 @@ export function FloatingStudyPilot({
     setCopied(false);
     setLastQuestion(studentText);
     setCardScreenshotDataUrl(null);
+    setStructuredCard(null);
 
     // Snapshot & clear pending screenshots so they are attached to this request only
     const attachedScreenshots = pendingScreenshots.slice();
@@ -420,6 +445,15 @@ export function FloatingStudyPilot({
       })
       .filter((img): img is CoachingImage => img !== null);
 
+    // For flashcards and quiz, append a JSON format instruction so the AI
+    // returns machine-parseable output we can render with a proper UI.
+    const structuredFormatInstruction =
+      action === 'flashcards'
+        ? ' Respond ONLY with a valid JSON array, no other text, no markdown fences. Format: [{"q":"question text","a":"answer text"},…] with 5–8 items.'
+        : action === 'quiz'
+          ? ' Respond ONLY with a valid JSON array, no other text, no markdown fences. Format: [{"question":"question text","options":["A) …","B) …","C) …","D) …"],"answer":0},…] where "answer" is the 0-based index of the correct option. Include 4–6 questions.'
+          : '';
+
     try {
       const response = await sendRuntimeMessage<CoachingResponse>({
         type: 'STUDYPILOT_REQUEST_COACHING',
@@ -427,13 +461,11 @@ export function FloatingStudyPilot({
           ...(sessionChatIdRef.current ? { chatId: sessionChatIdRef.current } : {}),
           requestId: crypto.randomUUID(),
           action,
-          question: prompt,
-          userMessage: studentText,
+          question: structuredFormatInstruction ? (prompt ?? '') + structuredFormatInstruction : prompt,
+          userMessage: studentText + structuredFormatInstruction,
           page,
           context: {
             ...context,
-            // Only ask the background to call captureVisibleTab if the global
-            // toggle is on AND the user hasn't already attached images manually.
             screenshot: context.screenshot && attachedImages.length === 0,
           },
           originSurface: 'extension',
@@ -443,9 +475,7 @@ export function FloatingStudyPilot({
             selection: page.selectedText,
             integrity: 'extension-v1',
           },
-          // Pre-attach images so the background skips captureVisibleTab
           images: attachedImages,
-          // Pass the first data URL through for the card preview
           screenshotDataUrl: attachedScreenshots[0],
         } as CoachingRequest,
       });
@@ -469,6 +499,25 @@ export function FloatingStudyPilot({
       // Use whatever the background echoed back, or fall back to what we sent
       const screenshotDataUrl = response.screenshotDataUrl ?? attachedScreenshots[0] ?? null;
 
+      // Attempt to parse structured JSON for flashcard/quiz actions
+      let parsed: StructuredCard = null;
+      if (action === 'flashcards' || action === 'quiz') {
+        try {
+          // Strip markdown code fences if the model wrapped the JSON anyway
+          const jsonText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+          const raw = JSON.parse(jsonText) as unknown;
+          if (Array.isArray(raw) && raw.length > 0) {
+            if (action === 'flashcards' && 'q' in (raw[0] as object)) {
+              parsed = { type: 'flashcards', items: raw as FlashcardItem[] };
+            } else if (action === 'quiz' && 'question' in (raw[0] as object)) {
+              parsed = { type: 'quiz', items: raw as QuizItem[] };
+            }
+          }
+        } catch {
+          // JSON parse failed — fall through to plain text display
+        }
+      }
+
       // Capture the server-assigned chatId from the commit so subsequent
       // requests in this session attach to the same chat.
       if (response.commit?.chatId) {
@@ -487,9 +536,11 @@ export function FloatingStudyPilot({
       setTranscript(nextTranscript);
       // Always update so it doesn't bleed into the next message
       setCardScreenshotDataUrl(screenshotDataUrl);
+      setStructuredCard(parsed);
       setCard({
         title: response.title || titleForAction(action, prompt),
         body: responseText,
+        action,
       });
       setCardOpen(true);
       setPhase('answer');
@@ -530,8 +581,89 @@ export function FloatingStudyPilot({
     }
   }
 
-  function handleSubmit() {
-    const text = question.trim();
+  /** Opens the full-panel study mode and fetches structured content from the AI. */
+  async function openStudyMode(action: 'flashcards' | 'quiz') {
+    setStudyMode(action);
+    setStudyLoading(true);
+    setStudyError(null);
+    setStructuredCard(null);
+
+    // Always re-read the page right now so we have the freshest content.
+    // Use a higher cap (12 000 chars) since dashboards / rich pages need more.
+    let freshPage: PageContext;
+    try {
+      const bodyText = document.body?.innerText ?? '';
+      const cleaned = bodyText.replace(/\s{3,}/g, '\n\n').trim();
+      const pageText = cleaned.length > 80
+        ? (cleaned.length > 12000 ? `${cleaned.slice(0, 12000)}…` : cleaned)
+        : undefined;
+      freshPage = {
+        ...getPageContext(),
+        pageText,
+      };
+    } catch {
+      freshPage = getPageContext();
+    }
+
+    const formatInstruction =
+      action === 'flashcards'
+        ? ' Respond ONLY with a valid JSON array, no markdown fences, no other text. Format: [{"q":"question text","a":"answer text"},…] with 5–8 items. Base every card ONLY on the PAGE CONTENT provided above — do not use outside knowledge.'
+        : ' Respond ONLY with a valid JSON array, no markdown fences, no other text. Format: [{"question":"question text","options":["A) …","B) …","C) …","D) …"],"answer":0},…] where "answer" is the 0-based index of the correct option. Include 4–6 questions. Base every question and its correct answer ONLY on the PAGE CONTENT provided above — do not use outside knowledge or invent facts.';
+
+    const studentText = defaultPromptForAction(action) + formatInstruction;
+
+    try {
+      const response = await sendRuntimeMessage<CoachingResponse>({
+        type: 'STUDYPILOT_REQUEST_COACHING',
+        payload: {
+          ...(sessionChatIdRef.current ? { chatId: sessionChatIdRef.current } : {}),
+          requestId: crypto.randomUUID(),
+          action,
+          question: studentText,
+          userMessage: studentText,
+          page: freshPage,
+          context: { ...context, screenshot: false, pageUrl: true, selectedText: false },
+          originSurface: 'extension',
+          clientContext: {
+            page: { title: freshPage.sourceTitle, url: freshPage.sourceUrl },
+            action,
+            selection: undefined,
+            integrity: 'extension-v1',
+          },
+          images: [],
+        } as CoachingRequest,
+      });
+
+      if (!response?.text.trim()) throw new Error('No response from StudyPilot AI.');
+
+      const jsonText = response.text.trim()
+        .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      const raw = JSON.parse(jsonText) as unknown;
+
+      if (!Array.isArray(raw) || raw.length === 0) throw new Error('Unexpected AI response format.');
+
+      if (action === 'flashcards' && 'q' in (raw[0] as object)) {
+        setStructuredCard({ type: 'flashcards', items: raw as FlashcardItem[] });
+      } else if (action === 'quiz' && 'question' in (raw[0] as object)) {
+        setStructuredCard({ type: 'quiz', items: raw as QuizItem[] });
+      } else {
+        throw new Error('Could not parse structured content.');
+      }
+    } catch (err) {
+      setStudyError(err instanceof Error ? err.message : 'Could not load content. Try again.');
+    } finally {
+      setStudyLoading(false);
+    }
+  }
+
+  function closeStudyMode() {
+    setStudyMode(null);
+    setStudyLoading(false);
+    setStudyError(null);
+    setStructuredCard(null);
+  }
+
+  function handleSubmit() {    const text = question.trim();
     if (!text && pendingScreenshots.length === 0) return;
     setQuestion('');
     void runStudyAction('explain', text || 'What can you tell me about this screenshot?');
@@ -916,6 +1048,59 @@ export function FloatingStudyPilot({
               {/* Show a web-app connect prompt when no session is available */}
               {authState?.connected === false ? (
                 <WebAppConnectView onOpenDashboard={() => void openDashboard()} />
+              ) : studyMode !== null ? (
+                /* ── Dedicated study mode panel ── */
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={studyMode}
+                    className="sp-study-panel"
+                    initial={{ opacity: 0, y: 18 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    <div className="sp-study-header">
+                      <button
+                        type="button"
+                        className="sp-study-back"
+                        aria-label="Back to chat"
+                        onClick={closeStudyMode}
+                      >
+                        <ArrowLeft size={17} strokeWidth={2} />
+                        <span>Back</span>
+                      </button>
+                      <span className="sp-study-title">
+                        {studyMode === 'flashcards' ? '🃏 Flashcards' : '🧠 Quiz'}
+                      </span>
+                      <button
+                        type="button"
+                        className="sp-study-reload"
+                        aria-label="Regenerate"
+                        title="Generate new set"
+                        onClick={() => void openStudyMode(studyMode)}
+                        disabled={studyLoading}
+                      >
+                        ↺
+                      </button>
+                    </div>
+
+                    {studyLoading ? (
+                      <div className="sp-study-loading">
+                        <span className="sp-study-spinner" aria-hidden="true" />
+                        <span>Generating {studyMode === 'flashcards' ? 'flashcards' : 'quiz'}…</span>
+                      </div>
+                    ) : studyError ? (
+                      <div className="sp-study-error">
+                        <p>{studyError}</p>
+                        <button type="button" onClick={() => void openStudyMode(studyMode)}>Try again</button>
+                      </div>
+                    ) : structuredCard?.type === 'flashcards' ? (
+                      <FlashcardViewer items={structuredCard.items} />
+                    ) : structuredCard?.type === 'quiz' ? (
+                      <QuizViewer items={structuredCard.items} />
+                    ) : null}
+                  </motion.div>
+                </AnimatePresence>
               ) : (
               <><motion.section
                   className="sp-stage"
@@ -1068,10 +1253,10 @@ export function FloatingStudyPilot({
                 <QuickChip label="Explain" onClick={() => void runStudyAction('explain')}>
                   <ExplainGlyph />
                 </QuickChip>
-                <QuickChip label="Quiz Me" onClick={() => void runStudyAction('quiz')}>
+                <QuickChip label="Quiz Me" onClick={() => void openStudyMode('quiz')}>
                   <QuizGlyph />
                 </QuickChip>
-                <QuickChip label="Flashcards" onClick={() => void runStudyAction('flashcards')}>
+                <QuickChip label="Flashcards" onClick={() => void openStudyMode('flashcards')}>
                   <FlashcardsGlyph />
                 </QuickChip>
               </motion.div>
@@ -1106,7 +1291,13 @@ export function FloatingStudyPilot({
                       exit={{ opacity: 0, height: 0 }}
                       transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                     >
-                      <p className="sp-card-body">{card.body}</p>
+                      {structuredCard?.type === 'flashcards' ? (
+                        <FlashcardViewer items={structuredCard.items} />
+                      ) : structuredCard?.type === 'quiz' ? (
+                        <QuizViewer items={structuredCard.items} />
+                      ) : (
+                        <p className="sp-card-body">{card.body}</p>
+                      )}
                       {cardScreenshotDataUrl ? (
                         <figure className="sp-card-screenshot">
                           <img
@@ -1189,6 +1380,154 @@ const sectionReveal = {
     transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const },
   },
 };
+
+// ─── FlashcardViewer ──────────────────────────────────────────────────────────
+
+function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
+  const [index, setIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+
+  function go(delta: number) {
+    setIndex(i => {
+      const next = (i + delta + items.length) % items.length;
+      return next;
+    });
+    setFlipped(false);
+  }
+
+  const card = items[index];
+  if (!card) return null;
+
+  return (
+    <div className="sp-fc-wrap">
+      <p className="sp-fc-counter">{index + 1} / {items.length}</p>
+
+      <button
+        type="button"
+        className="sp-fc-card"
+        data-flipped={flipped}
+        aria-label={flipped ? 'Showing answer — click to see question' : 'Showing question — click to reveal answer'}
+        onClick={() => setFlipped(f => !f)}
+      >
+        <div className="sp-fc-inner">
+          <div className="sp-fc-face sp-fc-front">
+            <span className="sp-fc-label">Q</span>
+            <p>{card.q}</p>
+          </div>
+          <div className="sp-fc-face sp-fc-back">
+            <span className="sp-fc-label">A</span>
+            <p>{card.a}</p>
+          </div>
+        </div>
+        <span className="sp-fc-hint">{flipped ? 'Click to flip back' : 'Click to reveal'}</span>
+      </button>
+
+      <div className="sp-fc-nav">
+        <button type="button" className="sp-fc-nav-btn" aria-label="Previous card" onClick={() => go(-1)}>‹</button>
+        <div className="sp-fc-dots">
+          {items.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              className="sp-fc-dot"
+              data-active={i === index}
+              aria-label={`Card ${i + 1}`}
+              onClick={() => { setIndex(i); setFlipped(false); }}
+            />
+          ))}
+        </div>
+        <button type="button" className="sp-fc-nav-btn" aria-label="Next card" onClick={() => go(1)}>›</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── QuizViewer ───────────────────────────────────────────────────────────────
+
+function QuizViewer({ items }: { items: QuizItem[] }) {
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [scores, setScores] = useState<boolean[]>([]);
+  const [done, setDone] = useState(false);
+
+  const q = items[index];
+  const isAnswered = selected !== null;
+  const isCorrect = selected === q?.answer;
+
+  function choose(optIdx: number) {
+    if (isAnswered) return;
+    setSelected(optIdx);
+    setScores(prev => [...prev, optIdx === q?.answer]);
+  }
+
+  function next() {
+    if (index + 1 >= items.length) {
+      setDone(true);
+    } else {
+      setIndex(i => i + 1);
+      setSelected(null);
+    }
+  }
+
+  function restart() {
+    setIndex(0);
+    setSelected(null);
+    setScores([]);
+    setDone(false);
+  }
+
+  if (done) {
+    const correct = scores.filter(Boolean).length;
+    const pct = Math.round((correct / items.length) * 100);
+    return (
+      <div className="sp-quiz-result">
+        <span className="sp-quiz-result-score" data-pass={pct >= 60}>{pct}%</span>
+        <p className="sp-quiz-result-label">{correct} / {items.length} correct</p>
+        <p className="sp-quiz-result-msg">
+          {pct === 100 ? 'Perfect score! 🎉' : pct >= 80 ? 'Great work!' : pct >= 60 ? 'Solid effort — review the ones you missed.' : 'Keep studying — you\'ll get there!'}
+        </p>
+        <button type="button" className="sp-quiz-retry" onClick={restart}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!q) return null;
+
+  return (
+    <div className="sp-quiz-wrap">
+      <p className="sp-quiz-counter">{index + 1} / {items.length}</p>
+      <p className="sp-quiz-question">{q.question}</p>
+      <div className="sp-quiz-options">
+        {q.options.map((opt, i) => (
+          <button
+            key={i}
+            type="button"
+            className="sp-quiz-option"
+            data-state={
+              !isAnswered ? 'idle'
+              : i === q.answer ? 'correct'
+              : i === selected ? 'wrong'
+              : 'idle'
+            }
+            disabled={isAnswered}
+            onClick={() => choose(i)}
+          >
+            <span className="sp-quiz-opt-letter">{String.fromCharCode(65 + i)}</span>
+            <span className="sp-quiz-opt-text">{opt.replace(/^[A-D]\)\s*/i, '')}</span>
+          </button>
+        ))}
+      </div>
+      {isAnswered ? (
+        <div className="sp-quiz-feedback">
+          <span data-correct={isCorrect}>{isCorrect ? '✓ Correct!' : `✗ The answer was ${String.fromCharCode(65 + q.answer)}`}</span>
+          <button type="button" className="sp-quiz-next" onClick={next}>
+            {index + 1 >= items.length ? 'See results' : 'Next →'}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function Orb({ state }: { state: OrbState }) {
   return (
