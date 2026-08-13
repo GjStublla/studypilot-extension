@@ -255,7 +255,7 @@ export function FloatingStudyPilot({
   const [pomodoroEndTime, setPomodoroEndTime] = useState<number | null>(null);
   const [pomodoroDuration, setPomodoroDuration] = useState<number>(25);
   const [pomodoroRemaining, setPomodoroRemaining] = useState<number | null>(null);
-  const [selectionTooltip, setSelectionTooltip] = useState<{ top: number; left: number; text: string } | null>(null);
+  const [selectionTooltip, setSelectionTooltip] = useState<{ top: number; left: number; text: string; placeBelow?: boolean } | null>(null);
   const [personality, setPersonality] = useState<string>('Default');
   const [streak, setStreak] = useState(0);
   const [pomodoroStats, setPomodoroStats] = useState<Record<string, number>>({});
@@ -461,7 +461,13 @@ export function FloatingStudyPilot({
   useEffect(() => {
     let tooltipLock = false;
 
-    function handleMouseUp() {
+    function handleMouseUp(e: MouseEvent) {
+      // Ignore mouseup if selection happened inside the extension shadow DOM
+      const target = e.target as HTMLElement;
+      if (target && target.closest && target.closest('#studypilot-extension-root')) {
+        return;
+      }
+
       tooltipLock = true;
       setTimeout(() => {
         tooltipLock = false;
@@ -471,7 +477,7 @@ export function FloatingStudyPilot({
           return;
         }
         const text = sel.toString().trim();
-        if (text.length < 3) {
+        if (text.length < 2) {
           setSelectionTooltip(null);
           return;
         }
@@ -481,18 +487,26 @@ export function FloatingStudyPilot({
           setSelectionTooltip(null);
           return;
         }
+
+        const placeBelow = rect.top < 70;
+        const tooltipTop = placeBelow ? rect.bottom + 8 : rect.top - 52;
+        const tooltipLeft = Math.max(10, Math.min(window.innerWidth - 280, rect.left + rect.width / 2 - 130));
+
         setSelectionTooltip({
-          top: Math.max(0, rect.top - 60),
-          left: Math.max(8, Math.min(window.innerWidth - 290, rect.left + rect.width / 2 - 140)),
-          text: text
+          top: tooltipTop,
+          left: tooltipLeft,
+          text: text,
+          placeBelow,
         });
       }, 50);
     }
 
     function handleMouseDown(e: MouseEvent) {
-      // If clicking the tooltip itself, don't dismiss
-      const target = e.target as HTMLElement;
-      if (target.closest('.sp-selection-tooltip')) return;
+      const path = e.composedPath ? e.composedPath() : [];
+      const isInsideTooltip = path.some(
+        (el) => el instanceof HTMLElement && el.classList && el.classList.contains('sp-selection-tooltip')
+      );
+      if (isInsideTooltip) return;
       if (!tooltipLock) {
         setSelectionTooltip(null);
       }
@@ -947,7 +961,7 @@ export function FloatingStudyPilot({
   }
 
   /** Opens the full-panel study mode and fetches structured content from the AI. */
-  async function openStudyMode(action: 'flashcards' | 'quiz') {
+  async function openStudyMode(action: 'flashcards' | 'quiz', overrideText?: string) {
     setStudyMode(action);
     setStudyLoading(true);
     setStudyError(null);
@@ -957,13 +971,14 @@ export function FloatingStudyPilot({
     // Use a higher cap (12 000 chars) since dashboards / rich pages need more.
     let freshPage: PageContext;
     try {
-      const bodyText = document.body?.innerText ?? '';
+      const bodyText = overrideText || document.body?.innerText || '';
       const cleaned = bodyText.replace(/\s{3,}/g, '\n\n').trim();
       const pageText = cleaned.length > 80
         ? (cleaned.length > 12000 ? `${cleaned.slice(0, 12000)}…` : cleaned)
         : undefined;
       freshPage = {
         ...getPageContext(),
+        ...(overrideText ? { selectedText: overrideText } : {}),
         pageText,
       };
     } catch {
@@ -1332,159 +1347,88 @@ export function FloatingStudyPilot({
   }
 
   return (
-    <div
-      className="sp-extension"
-      style={dragPos ? { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' } : undefined}
-    >
-      {/* Confetti canvas overlay */}
-      {showConfetti && (
-        <canvas
-          ref={(el) => {
-            confettiRef.current = el;
-            if (!el) return;
-            const W = window.innerWidth;
-            const H = window.innerHeight;
-            el.width = W;
-            el.height = H;
-            el.style.cssText = `position:fixed;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;z-index:99999999`;
-            const ctx2d = el.getContext('2d')!;
-            const particles = Array.from({ length: 120 }, () => ({
-              x: Math.random() * W,
-              y: Math.random() * H * 0.4 - H * 0.1,
-              vx: (Math.random() - 0.5) * 6,
-              vy: Math.random() * 3 + 2,
-              color: ['#f97316','#ef4444','#8b5cf6','#10b981','#3b82f6','#fbbf24'][Math.floor(Math.random()*6)],
-              size: Math.random() * 8 + 4,
-              rot: Math.random() * 360,
-              rotV: (Math.random() - 0.5) * 8,
-            }));
-            let alive = true;
-            const draw = () => {
-              if (!alive) return;
-              ctx2d.clearRect(0, 0, W, H);
-              for (const p of particles) {
-                ctx2d.save();
-                ctx2d.translate(p.x, p.y);
-                ctx2d.rotate((p.rot * Math.PI) / 180);
-                ctx2d.fillStyle = p.color;
-                ctx2d.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.5);
-                ctx2d.restore();
-                p.x += p.vx;
-                p.y += p.vy;
-                p.rot += p.rotV;
-                p.vy += 0.12;
-              }
-              requestAnimationFrame(draw);
-            };
-            draw();
-            setTimeout(() => { alive = false; }, 3500);
-          }}
-        />
-      )}
-      <AnimatePresence>
-        {!isOpen ? (
-          <motion.button
-            key="launcher"
-            type="button"
-            className="sp-launcher"
-            aria-label="Open Study Pilot"
-            title={`Study Pilot — ask about ${sourceLabel}`}
-            onClick={() => { if (!launcherDidDrag.current) setIsOpen(true); }}
-            onPointerDown={onLauncherPointerDown}
-            onPointerMove={onLauncherPointerMove}
-            onPointerUp={onLauncherPointerUp}
-            initial={{ opacity: 0, scale: 0.8, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.85, y: 8 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="sp-launcher-ring" aria-hidden="true" />
-            <span className="sp-launcher-wave" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-          </motion.button>
-        ) : null}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {selectionTooltip && !isOpen ? (
-          <motion.div
-            className="sp-selection-tooltip"
-            initial={{ opacity: 0, y: 8, scale: 0.93 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.95 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-            style={{
-              position: 'fixed',
-              top: selectionTooltip.top,
-              left: selectionTooltip.left,
-              zIndex: 9999999,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '2px',
-              padding: '5px 6px',
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-              borderRadius: '10px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.1)',
+    <>
+      <div
+        className="sp-extension"
+        style={dragPos ? { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' } : undefined}
+      >
+        {/* Confetti canvas overlay */}
+        {showConfetti && (
+          <canvas
+            ref={(el) => {
+              confettiRef.current = el;
+              if (!el) return;
+              const W = window.innerWidth;
+              const H = window.innerHeight;
+              el.width = W;
+              el.height = H;
+              el.style.cssText = `position:fixed;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;z-index:99999999`;
+              const ctx2d = el.getContext('2d')!;
+              const particles = Array.from({ length: 120 }, () => ({
+                x: Math.random() * W,
+                y: Math.random() * H * 0.4 - H * 0.1,
+                vx: (Math.random() - 0.5) * 6,
+                vy: Math.random() * 3 + 2,
+                color: ['#f97316','#ef4444','#8b5cf6','#10b981','#3b82f6','#fbbf24'][Math.floor(Math.random()*6)],
+                size: Math.random() * 8 + 4,
+                rot: Math.random() * 360,
+                rotV: (Math.random() - 0.5) * 8,
+              }));
+              let alive = true;
+              const draw = () => {
+                if (!alive) return;
+                ctx2d.clearRect(0, 0, W, H);
+                for (const p of particles) {
+                  ctx2d.save();
+                  ctx2d.translate(p.x, p.y);
+                  ctx2d.rotate((p.rot * Math.PI) / 180);
+                  ctx2d.fillStyle = p.color;
+                  ctx2d.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.5);
+                  ctx2d.restore();
+                  p.x += p.vx;
+                  p.y += p.vy;
+                  p.rot += p.rotV;
+                  p.vy += 0.12;
+                }
+                requestAnimationFrame(draw);
+              };
+              draw();
+              setTimeout(() => { alive = false; }, 3500);
             }}
-          >
-            {/* Caret arrow pointing down */}
-            <span style={{
-              position: 'absolute',
-              bottom: -6,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '6px solid transparent',
-              borderRight: '6px solid transparent',
-              borderTop: '6px solid #16213e',
-              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
-            }} />
-            {[
-              { label: 'Explain', icon: <Lightbulb size={13} strokeWidth={2} />, color: '#f59e0b', action: () => { setIsOpen(true); void runStudyAction('explain'); setSelectionTooltip(null); } },
-              { label: 'Flashcard', icon: <Layers size={13} strokeWidth={2} />, color: '#8b5cf6', action: () => { setIsOpen(true); void openStudyMode('flashcards'); setSelectionTooltip(null); } },
-              { label: 'Quiz Me', icon: <HelpCircle size={13} strokeWidth={2} />, color: '#10b981', action: () => { setIsOpen(true); void openStudyMode('quiz'); setSelectionTooltip(null); } },
-            ].map(({ label, icon, color, action }) => (
-              <button
-                key={label}
-                type="button"
-                onClick={action}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  padding: '5px 9px',
-                  borderRadius: '7px',
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#e2e8f0',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'background 0.15s ease',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.01em',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-              >
-                <span style={{ color }}>{icon}</span>
-                {label}
-              </button>
-            ))}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+          />
+        )}
+        <AnimatePresence>
+          {!isOpen ? (
+            <motion.button
+              key="launcher"
+              type="button"
+              className="sp-launcher"
+              aria-label="Open Study Pilot"
+              title={`Study Pilot — ask about ${sourceLabel}`}
+              onClick={() => { if (!launcherDidDrag.current) setIsOpen(true); }}
+              onPointerDown={onLauncherPointerDown}
+              onPointerMove={onLauncherPointerMove}
+              onPointerUp={onLauncherPointerUp}
+              initial={{ opacity: 0, scale: 0.8, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 8 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <span className="sp-launcher-ring" aria-hidden="true" />
+              <span className="sp-launcher-wave" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
 
-      <AnimatePresence>
-        {isOpen ? (
-          <motion.section
-            key="panel"
-            className="sp-panel"
+        <AnimatePresence>
+          {isOpen ? (
+            <motion.section
+              key="panel"
+              className="sp-panel"
             role="dialog"
             aria-label="Study Pilot"
             style={panelSize ? { width: panelSize.w, height: panelSize.h } : undefined}
@@ -2059,6 +2003,112 @@ export function FloatingStudyPilot({
         ) : null}
       </AnimatePresence>
     </div>
+
+      <AnimatePresence>
+        {selectionTooltip && !isOpen ? (
+          <motion.div
+            className="sp-selection-tooltip"
+            onMouseDown={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, y: selectionTooltip.placeBelow ? -8 : 8, scale: 0.93 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: selectionTooltip.placeBelow ? -4 : 4, scale: 0.95 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              position: 'fixed',
+              top: selectionTooltip.top,
+              left: selectionTooltip.left,
+              zIndex: 2147483647,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2px',
+              padding: '5px 6px',
+              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+              borderRadius: '10px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            {/* Caret arrow pointing down or up */}
+            <span style={{
+              position: 'absolute',
+              ...(selectionTooltip.placeBelow
+                ? { top: -6, borderBottom: '6px solid #16213e', borderTop: 'none' }
+                : { bottom: -6, borderTop: '6px solid #16213e', borderBottom: 'none' }),
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 0,
+              height: 0,
+              borderLeft: '6px solid transparent',
+              borderRight: '6px solid transparent',
+              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
+            }} />
+            {[
+              {
+                label: 'Explain',
+                icon: <Lightbulb size={13} strokeWidth={2} />,
+                color: '#f59e0b',
+                action: () => {
+                  const selText = selectionTooltip.text;
+                  setIsOpen(true);
+                  setSelectionTooltip(null);
+                  void runStudyAction('explain', `Explain this: "${selText}"`);
+                }
+              },
+              {
+                label: 'Flashcard',
+                icon: <Layers size={13} strokeWidth={2} />,
+                color: '#8b5cf6',
+                action: () => {
+                  const selText = selectionTooltip.text;
+                  setIsOpen(true);
+                  setSelectionTooltip(null);
+                  void openStudyMode('flashcards', selText);
+                }
+              },
+              {
+                label: 'Quiz Me',
+                icon: <HelpCircle size={13} strokeWidth={2} />,
+                color: '#10b981',
+                action: () => {
+                  const selText = selectionTooltip.text;
+                  setIsOpen(true);
+                  setSelectionTooltip(null);
+                  void openStudyMode('quiz', selText);
+                }
+              },
+            ].map(({ label, icon, color, action }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={action}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '5px 9px',
+                  borderRadius: '7px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#e2e8f0',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '0.01em',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+              >
+                <span style={{ color }}>{icon}</span>
+                {label}
+              </button>
+            ))}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </>
   );
 }
 
