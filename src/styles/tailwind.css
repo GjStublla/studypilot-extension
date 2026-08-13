@@ -731,8 +731,8 @@
 .sp-chips {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin: 12px 0;
+  gap: 6px;
+  margin: 10px 0;
 }
 
 .sp-chip {
@@ -768,7 +768,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -1180,6 +1180,49 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+/* --------------------------------------------------------------- chip icons */
+
+.sp-chip-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.sp-chip-icon--blue   { background: rgba(61, 125, 253, 0.22); color: #6ea8ff; }
+.sp-chip-icon--amber  { background: rgba(251, 191, 36, 0.16); color: #fbbf24; }
+.sp-chip-icon--green  { background: rgba(31, 188, 132, 0.18); color: #34d399; }
+.sp-chip-icon--violet { background: rgba(139, 92, 246, 0.20); color: #c084fc; }
+
+/* ------------------------------------------------------------- resize handle */
+
+.sp-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 22px;
+  height: 22px;
+  cursor: nwse-resize;
+  z-index: 10;
+  /* Visible grip dots */
+  background-image:
+    radial-gradient(circle, rgba(148, 163, 205, 0.35) 1.5px, transparent 1.5px);
+  background-size: 5px 5px;
+  background-position: bottom 4px right 4px;
+  background-repeat: repeat;
+  -webkit-mask: linear-gradient(135deg, transparent 40%, #000 100%);
+  mask: linear-gradient(135deg, transparent 40%, #000 100%);
+  border-radius: 0 0 28px 0;
+  transition: opacity 150ms var(--sp-ease);
+  opacity: 0.5;
+}
+
+.sp-resize-handle:hover {
+  opacity: 1;
 }
 
 /* ------------------------------------------------------------------- login view */

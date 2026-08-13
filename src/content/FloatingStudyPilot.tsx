@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   ThumbsDown,
   ThumbsUp,
+  Timer,
   Volume2,
   X,
 } from 'lucide-react';
@@ -251,6 +252,16 @@ export function FloatingStudyPilot({
   const [studyError, setStudyError] = useState<string | null>(null);
   // Screenshots attached to the *next* message the user will send
   const [pendingScreenshots, setPendingScreenshots] = useState<string[]>([]);
+  const [pomodoroEndTime, setPomodoroEndTime] = useState<number | null>(null);
+  const [pomodoroDuration, setPomodoroDuration] = useState<number>(25);
+  const [pomodoroRemaining, setPomodoroRemaining] = useState<number | null>(null);
+  const [selectionTooltip, setSelectionTooltip] = useState<{ top: number; left: number; text: string } | null>(null);
+  const [personality, setPersonality] = useState<string>('Default');
+  const [streak, setStreak] = useState(0);
+  const [pomodoroStats, setPomodoroStats] = useState<Record<string, number>>({});
+  const [showConfetti, setShowConfetti] = useState(false);
+  const confettiRef = useRef<HTMLCanvasElement | null>(null);
+  const [pomodoroPickerOpen, setPomodoroPickerOpen] = useState(false);
 
   const [context, setContext] = useState<ContextShareSettings>({
     screenshot: false,
@@ -448,6 +459,55 @@ export function FloatingStudyPilot({
   }, []);
 
   useEffect(() => {
+    let tooltipLock = false;
+
+    function handleMouseUp() {
+      tooltipLock = true;
+      setTimeout(() => {
+        tooltipLock = false;
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+          setSelectionTooltip(null);
+          return;
+        }
+        const text = sel.toString().trim();
+        if (text.length < 3) {
+          setSelectionTooltip(null);
+          return;
+        }
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) {
+          setSelectionTooltip(null);
+          return;
+        }
+        setSelectionTooltip({
+          top: Math.max(0, rect.top - 60),
+          left: Math.max(8, Math.min(window.innerWidth - 290, rect.left + rect.width / 2 - 140)),
+          text: text
+        });
+      }, 50);
+    }
+
+    function handleMouseDown(e: MouseEvent) {
+      // If clicking the tooltip itself, don't dismiss
+      const target = e.target as HTMLElement;
+      if (target.closest('.sp-selection-tooltip')) return;
+      if (!tooltipLock) {
+        setSelectionTooltip(null);
+      }
+    }
+
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('mousedown', handleMouseDown);
+
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, []);
+
+  useEffect(() => {
     if (isOpen) void refreshAuthState();
   }, [isOpen]);
 
@@ -469,6 +529,175 @@ export function FloatingStudyPilot({
       recognitionRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.get(['pomodoroEndTime', 'pomodoroDuration', 'personality', 'pomodoroStats'], (res) => {
+        setPomodoroEndTime(res.pomodoroEndTime ?? null);
+        if (res.pomodoroDuration) setPomodoroDuration(res.pomodoroDuration);
+        if (res.personality) setPersonality(res.personality);
+        if (res.pomodoroStats) setPomodoroStats(res.pomodoroStats);
+      });
+      const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
+        if (changes.pomodoroEndTime) {
+          setPomodoroEndTime(changes.pomodoroEndTime.newValue ?? null);
+        }
+        if (changes.pomodoroDuration) {
+          setPomodoroDuration(changes.pomodoroDuration.newValue ?? 25);
+        }
+        if (changes.personality) {
+          setPersonality(changes.personality.newValue ?? 'Default');
+        }
+        if (changes.pomodoroStats) {
+          setPomodoroStats(changes.pomodoroStats.newValue ?? {});
+        }
+      };
+      chrome.storage.onChanged.addListener(listener);
+      return () => chrome.storage.onChanged.removeListener(listener);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!pomodoroEndTime) {
+      setPomodoroRemaining(null);
+      return;
+    }
+
+    const updateTimer = () => {
+      const remaining = Math.max(0, Math.floor((pomodoroEndTime - Date.now()) / 1000));
+      setPomodoroRemaining(remaining);
+
+      if (remaining <= 0) {
+        setPomodoroEndTime(null);
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+          chrome.storage.local.get('pomodoroStats', (res) => {
+            const today = new Date().toISOString().split('T')[0];
+            const stats = res.pomodoroStats || {};
+            stats[today] = (stats[today] || 0) + pomodoroDuration;
+            chrome.storage.local.set({ pomodoroStats: stats }).catch(() => {});
+          });
+          chrome.storage.local.remove(['pomodoroEndTime', 'pomodoroDuration']).catch(() => {});
+        }
+        playChime();
+        void runStudyAction(
+          'explain',
+          `The student just completed a ${pomodoroDuration}-minute focus session. Briefly congratulate them and ask them what 2 things they learned. Keep it very short.`
+        );
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [pomodoroEndTime]);
+
+  function startPomodoro(minutes: number) {
+    const end = Date.now() + minutes * 60 * 1000;
+    setPomodoroEndTime(end);
+    setPomodoroDuration(minutes);
+    setPomodoroPickerOpen(false);
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.set({ pomodoroEndTime: end, pomodoroDuration: minutes }).catch(() => {});
+    }
+    playStartSound();
+    flashNotice(`🎯 Focus: ${minutes} min — let's go!`);
+  }
+
+  function stopPomodoro() {
+    setPomodoroEndTime(null);
+    setPomodoroPickerOpen(false);
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.remove(['pomodoroEndTime', 'pomodoroDuration']).catch(() => {});
+    }
+    flashNotice('Focus session ended');
+  }
+
+  function formatTime(seconds: number) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // ── Sound helpers (Web Audio API, no files needed) ───────────────────────
+  function playStartSound() {
+    try {
+      const ctx = new AudioContext();
+      [440, 554.37, 659.25].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        const t = ctx.currentTime + i * 0.1;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.15, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        osc.start(t);
+        osc.stop(t + 0.25);
+      });
+      setTimeout(() => void ctx.close(), 800);
+    } catch { /* */ }
+  }
+  function playChime() {
+    try {
+      const ctx = new AudioContext();
+      const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.18;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.18, start + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.6);
+        osc.start(start);
+        osc.stop(start + 0.6);
+      });
+      setTimeout(() => void ctx.close(), 2000);
+    } catch { /* no audio context available */ }
+  }
+
+  function playSaveSound() {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.35);
+      setTimeout(() => void ctx.close(), 500);
+    } catch { /* no audio context available */ }
+  }
+
+  // ── Streak logic ─────────────────────────────────────────────────────────
+  function updateStreak() {
+    if (typeof chrome === 'undefined' || !chrome.storage) return;
+    const today = new Date().toDateString();
+    chrome.storage.local.get(['streakDate', 'streakCount'], (res) => {
+      const lastDate = res.streakDate as string | undefined;
+      const count = (res.streakCount as number | undefined) ?? 0;
+      const newCount = lastDate === today ? count : (lastDate === new Date(Date.now() - 86400000).toDateString() ? count + 1 : 1);
+      setStreak(newCount);
+      chrome.storage.local.set({ streakDate: today, streakCount: newCount }).catch(() => {});
+    });
+  }
+
+  // ── Confetti burst ───────────────────────────────────────────────────────
+  function fireConfetti() {
+    setShowConfetti(true);
+    playChime();
+    setTimeout(() => setShowConfetti(false), 3500);
+  }
 
   const orbState: OrbState = phase === 'thinking'
     ? 'thinking'
@@ -539,13 +768,19 @@ export function FloatingStudyPilot({
 
   async function runStudyAction(action: StudyAction, customQuestion?: string, autoSpeak = false) {
     const prompt = customQuestion?.trim();
-    const studentText = prompt || defaultPromptForAction(action);
+    let personalityPrefix = '';
+    if (personality === 'Strict Tutor') personalityPrefix = 'You are a Strict Tutor. Be demanding, push the student to excel, and accept no nonsense. ';
+    if (personality === 'Supportive Friend') personalityPrefix = 'You are a Supportive Friend. Be extremely encouraging, casual, and use emojis. ';
+    if (personality === 'Socratic Guide') personalityPrefix = 'You are a Socratic Guide. Do NOT give the student answers directly. Instead, ask 2-3 guiding questions that lead them to discover the answer themselves. ';
+    if (personality === 'Gen Z') personalityPrefix = 'You are a Gen Z student. Use modern internet slang and a very casual tone, but still be helpful. ';
+
+    const studentText = personalityPrefix + (prompt || defaultPromptForAction(action));
     const priorTranscript = transcript;
     const userTurn: StudyTranscriptTurn = {
       id: crypto.randomUUID(),
       sequence: transcript.length,
       role: 'user',
-      text: studentText,
+      text: prompt || defaultPromptForAction(action), // UI shows original text without prefix
       atSeconds: elapsedSeconds(),
     };
 
@@ -589,7 +824,7 @@ export function FloatingStudyPilot({
           ...(sessionChatIdRef.current ? { chatId: sessionChatIdRef.current } : {}),
           requestId: crypto.randomUUID(),
           action,
-          question: structuredFormatInstruction ? (prompt ?? '') + structuredFormatInstruction : prompt,
+          question: structuredFormatInstruction ? (studentText ?? '') + structuredFormatInstruction : studentText,
           userMessage: studentText + structuredFormatInstruction,
           page,
           context: {
@@ -673,6 +908,8 @@ export function FloatingStudyPilot({
       setCardOpen(true);
       setPhase('answer');
       flashNotice('Coach response ready');
+      playSaveSound();
+      updateStreak();
       if (autoSpeak) {
         if ('speechSynthesis' in window) {
           window.speechSynthesis.cancel();
@@ -1099,6 +1336,51 @@ export function FloatingStudyPilot({
       className="sp-extension"
       style={dragPos ? { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' } : undefined}
     >
+      {/* Confetti canvas overlay */}
+      {showConfetti && (
+        <canvas
+          ref={(el) => {
+            confettiRef.current = el;
+            if (!el) return;
+            const W = window.innerWidth;
+            const H = window.innerHeight;
+            el.width = W;
+            el.height = H;
+            el.style.cssText = `position:fixed;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;z-index:99999999`;
+            const ctx2d = el.getContext('2d')!;
+            const particles = Array.from({ length: 120 }, () => ({
+              x: Math.random() * W,
+              y: Math.random() * H * 0.4 - H * 0.1,
+              vx: (Math.random() - 0.5) * 6,
+              vy: Math.random() * 3 + 2,
+              color: ['#f97316','#ef4444','#8b5cf6','#10b981','#3b82f6','#fbbf24'][Math.floor(Math.random()*6)],
+              size: Math.random() * 8 + 4,
+              rot: Math.random() * 360,
+              rotV: (Math.random() - 0.5) * 8,
+            }));
+            let alive = true;
+            const draw = () => {
+              if (!alive) return;
+              ctx2d.clearRect(0, 0, W, H);
+              for (const p of particles) {
+                ctx2d.save();
+                ctx2d.translate(p.x, p.y);
+                ctx2d.rotate((p.rot * Math.PI) / 180);
+                ctx2d.fillStyle = p.color;
+                ctx2d.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.5);
+                ctx2d.restore();
+                p.x += p.vx;
+                p.y += p.vy;
+                p.rot += p.rotV;
+                p.vy += 0.12;
+              }
+              requestAnimationFrame(draw);
+            };
+            draw();
+            setTimeout(() => { alive = false; }, 3500);
+          }}
+        />
+      )}
       <AnimatePresence>
         {!isOpen ? (
           <motion.button
@@ -1127,6 +1409,78 @@ export function FloatingStudyPilot({
       </AnimatePresence>
 
       <AnimatePresence>
+        {selectionTooltip && !isOpen ? (
+          <motion.div
+            className="sp-selection-tooltip"
+            initial={{ opacity: 0, y: 8, scale: 0.93 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              position: 'fixed',
+              top: selectionTooltip.top,
+              left: selectionTooltip.left,
+              zIndex: 9999999,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2px',
+              padding: '5px 6px',
+              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+              borderRadius: '10px',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            {/* Caret arrow pointing down */}
+            <span style={{
+              position: 'absolute',
+              bottom: -6,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: 0,
+              height: 0,
+              borderLeft: '6px solid transparent',
+              borderRight: '6px solid transparent',
+              borderTop: '6px solid #16213e',
+              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
+            }} />
+            {[
+              { label: 'Explain', icon: <Lightbulb size={13} strokeWidth={2} />, color: '#f59e0b', action: () => { setIsOpen(true); void runStudyAction('explain'); setSelectionTooltip(null); } },
+              { label: 'Flashcard', icon: <Layers size={13} strokeWidth={2} />, color: '#8b5cf6', action: () => { setIsOpen(true); void openStudyMode('flashcards'); setSelectionTooltip(null); } },
+              { label: 'Quiz Me', icon: <HelpCircle size={13} strokeWidth={2} />, color: '#10b981', action: () => { setIsOpen(true); void openStudyMode('quiz'); setSelectionTooltip(null); } },
+            ].map(({ label, icon, color, action }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={action}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '5px 9px',
+                  borderRadius: '7px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#e2e8f0',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease',
+                  whiteSpace: 'nowrap',
+                  letterSpacing: '0.01em',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+              >
+                <span style={{ color }}>{icon}</span>
+                {label}
+              </button>
+            ))}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {isOpen ? (
           <motion.section
             key="panel"
@@ -1149,6 +1503,20 @@ export function FloatingStudyPilot({
               <div className="sp-brand">
                 <SparkleLogo size={30} />
                 <strong>Study Pilot</strong>
+                {streak > 0 && (
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg,#f97316,#ef4444)',
+                    color: '#fff',
+                    borderRadius: '99px',
+                    padding: '1px 7px',
+                    marginLeft: '4px',
+                    letterSpacing: '0.02em',
+                  }}>
+                    🔥 {streak}d
+                  </span>
+                )}
               </div>
               <div className="sp-header-actions">
                 <button
@@ -1222,14 +1590,31 @@ export function FloatingStudyPilot({
                           void openDashboard();
                         }}
                       />
-                      <MenuItem
-                        icon={<Minus size={16} />}
-                        label="Minimize"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          setIsOpen(false);
-                        }}
-                      />
+                      
+                      <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
+                      <div style={{ padding: '6px 12px', fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        AI Personality
+                      </div>
+                      {['Default', 'Strict Tutor', 'Supportive Friend', 'Socratic Guide', 'Gen Z'].map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          className="sp-menu-item"
+                          onClick={() => {
+                            setPersonality(p);
+                            if (typeof chrome !== 'undefined' && chrome.storage) {
+                              chrome.storage.local.set({ personality: p }).catch(() => {});
+                            }
+                            setMenuOpen(false);
+                          }}
+                        >
+                          <span className="sp-menu-item-icon">
+                            {personality === p ? <Check size={16} color="#10b981" /> : <span style={{ width: 16 }} />}
+                          </span>
+                          {p}
+                        </button>
+                      ))}
+
                     </motion.div>
                   </>
                 ) : null}
@@ -1299,7 +1684,7 @@ export function FloatingStudyPilot({
                     ) : structuredCard?.type === 'flashcards' ? (
                       <FlashcardViewer items={structuredCard.items} />
                     ) : structuredCard?.type === 'quiz' ? (
-                      <QuizViewer items={structuredCard.items} />
+                      <QuizViewer items={structuredCard.items} onPerfectScore={fireConfetti} />
                     ) : null}
                   </motion.div>
                 </AnimatePresence>
@@ -1461,7 +1846,101 @@ export function FloatingStudyPilot({
                 <QuickChip label="Flashcards" onClick={() => void openStudyMode('flashcards')}>
                   <FlashcardsGlyph />
                 </QuickChip>
+                {pomodoroRemaining !== null ? (
+                  <QuickChip label={`⏱ ${formatTime(pomodoroRemaining)}`} onClick={stopPomodoro}>
+                    <span className="sp-chip-icon" aria-hidden="true" style={{ background: 'linear-gradient(135deg,#f97316,#ef4444)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <X size={12} strokeWidth={2.5} color="#fff" />
+                    </span>
+                  </QuickChip>
+                ) : (
+                  <QuickChip label="Focus" onClick={() => setPomodoroPickerOpen(v => !v)}>
+                    <span className="sp-chip-icon sp-chip-icon--blue" aria-hidden="true">
+                      <Timer size={14} strokeWidth={2.2} />
+                    </span>
+                  </QuickChip>
+                )}
               </motion.div>
+
+              <AnimatePresence>
+                {pomodoroPickerOpen && pomodoroRemaining === null ? (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.2 }}
+                    style={{
+                      display: 'flex',
+                      gap: '6px',
+                      padding: '6px 14px 10px',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, width: '100%', textAlign: 'center', marginBottom: '2px' }}>
+                      🎯 Pick your focus time
+                    </span>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', width: '100%', marginBottom: '8px' }}>
+                      {[5, 15, 25, 45, 60].map(mins => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => startPomodoro(mins)}
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(99,102,241,0.25)',
+                            background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
+                            color: '#818cf8',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2))';
+                            e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)';
+                            e.currentTarget.style.transform = 'scale(1.05)';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))';
+                            e.currentTarget.style.borderColor = 'rgba(99,102,241,0.25)';
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                        >
+                          {mins}m
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {/* Weekly Progress Mini Chart */}
+                    <div style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Weekly Progress</span>
+                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '40px' }}>
+                        {Array.from({ length: 7 }).map((_, i) => {
+                          const d = new Date();
+                          d.setDate(d.getDate() - (6 - i));
+                          const dateKey = d.toISOString().split('T')[0];
+                          const mins = pomodoroStats[dateKey] || 0;
+                          const maxMins = Math.max(...Object.values(pomodoroStats), 60);
+                          const hPct = Math.max(4, (mins / maxMins) * 100);
+                          const isToday = i === 6;
+                          return (
+                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                              <div style={{ width: '14px', height: '40px', display: 'flex', alignItems: 'flex-end', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                <div style={{ width: '100%', height: `${hPct}%`, background: isToday ? 'linear-gradient(to top, #8b5cf6, #3b82f6)' : '#475569', borderRadius: '3px', transition: 'height 0.3s ease' }} title={`${mins} min`} />
+                              </div>
+                              <span style={{ fontSize: '9px', color: isToday ? '#8b5cf6' : '#64748b', fontWeight: isToday ? 700 : 500 }}>
+                                {['S','M','T','W','T','F','S'][d.getDay()]}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
 
               <motion.section
                 className="sp-card"
@@ -1567,6 +2046,15 @@ export function FloatingStudyPilot({
                 <span>Pro</span>
               </button>
             </footer>
+
+            {/* Resize handle — bottom-right corner */}
+            <div
+              className="sp-resize-handle"
+              aria-hidden="true"
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerUp}
+            />
           </motion.section>
         ) : null}
       </AnimatePresence>
@@ -1719,7 +2207,7 @@ function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
 
 // ─── QuizViewer ───────────────────────────────────────────────────────────────
 
-function QuizViewer({ items }: { items: QuizItem[] }) {
+function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPerfectScore?: () => void }) {
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [scores, setScores] = useState<boolean[]>([]);
@@ -1754,6 +2242,7 @@ function QuizViewer({ items }: { items: QuizItem[] }) {
   if (done) {
     const correct = scores.filter(Boolean).length;
     const pct = Math.round((correct / items.length) * 100);
+    if (pct === 100) onPerfectScore?.();
     return (
       <div className="sp-quiz-result">
         <span className="sp-quiz-result-score" data-pass={pct >= 60}>{pct}%</span>

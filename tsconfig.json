@@ -18,7 +18,6 @@
     "types": ["chrome", "vite/client"],
     "ignoreDeprecations": "5.0",
     "baseUrl": ".",
-    "ignoreDeprecations": "5.0",
     "paths": {
       "@/*": ["./src/*"]
     }
