@@ -61,7 +61,13 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: localBuild ? 'dist-local' : 'dist',
+      rollupOptions: {
+        input: {
+          offscreen: path.resolve(__dirname, 'src/offscreen.html'),
+        },
+      },
     },
+    publicDir: 'public',
     server: {
       port: 5179,
       strictPort: true,

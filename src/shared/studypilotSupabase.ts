@@ -18,7 +18,6 @@ import type {
   DashboardSessionSummary,
   ExtensionAuthSession,
   ExtensionAuthState,
-  LiveTokenResult,
   SharedChatContext,
   StudyFolder,
   StudyPilotSessionMode,
@@ -78,6 +77,13 @@ interface DashboardChatRow {
   title?: string;
   created_at?: string;
   updated_at?: string;
+  rubric_id?: string | null;
+}
+
+interface RubricRow {
+  id?: string;
+  title?: string;
+  file_search_status?: string | null;
 }
 
 interface DashboardSessionRow {
@@ -168,6 +174,12 @@ async function readStoredSession(): Promise<ExtensionAuthSession | null> {
 
 async function writeStoredSession(session: ExtensionAuthSession): Promise<void> {
   await storageSet(STORAGE_KEY, session);
+}
+
+/** Access token for Edge calls from the service worker (Live bootstrap, etc.). */
+export async function getAccessTokenForEdge(): Promise<string> {
+  const session = await ensureAuthenticatedSession();
+  return session.accessToken;
 }
 
 async function ensureAuthenticatedSession(): Promise<AuthenticatedSession> {
@@ -571,7 +583,7 @@ export async function setActiveDashboardChat(chatId: string | null): Promise<voi
 
 async function listDashboardChats(): Promise<DashboardChatSummary[]> {
   const params = new URLSearchParams({
-    select: 'id,session_id,title,created_at,updated_at',
+    select: 'id,session_id,title,created_at,updated_at,rubric_id',
     order: 'updated_at.desc,id.desc',
     limit: '50',
   });
@@ -579,7 +591,42 @@ async function listDashboardChats(): Promise<DashboardChatSummary[]> {
     headers: { Accept: 'application/json' },
   });
   if (!response.ok) throw await responseError(response);
-  return (await parseJsonResponse<DashboardChatRow[]>(response)).map(mapDashboardChat);
+  const chats = (await parseJsonResponse<DashboardChatRow[]>(response)).map(mapDashboardChat);
+  return attachRubricMeta(chats);
+}
+
+async function attachRubricMeta(chats: DashboardChatSummary[]): Promise<DashboardChatSummary[]> {
+  const rubricIds = [...new Set(chats.map(c => c.rubricId).filter((id): id is string => Boolean(id)))];
+  if (rubricIds.length === 0) return chats;
+
+  const params = new URLSearchParams({
+    select: 'id,title,file_search_status',
+    id: `in.(${rubricIds.join(',')})`,
+  });
+  const response = await restFetch(`rubrics?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) return chats;
+
+  const rows = await parseJsonResponse<RubricRow[]>(response);
+  const byId = new Map(
+    rows
+      .filter((row): row is RubricRow & { id: string } => typeof row.id === 'string')
+      .map(row => [row.id, row]),
+  );
+
+  return chats.map(chat => {
+    if (!chat.rubricId) return chat;
+    const rubric = byId.get(chat.rubricId);
+    if (!rubric) return chat;
+    const fileSearchStatus = rubric.file_search_status ?? null;
+    return {
+      ...chat,
+      rubricTitle: rubric.title?.trim() || 'Rubric',
+      rubricFileSearchStatus: fileSearchStatus,
+      ragReady: fileSearchStatus === 'indexed',
+    };
+  });
 }
 
 async function listDashboardSessions(): Promise<DashboardSessionSummary[]> {
@@ -593,46 +640,6 @@ async function listDashboardSessions(): Promise<DashboardSessionSummary[]> {
   });
   if (!response.ok) throw await responseError(response);
   return (await parseJsonResponse<DashboardSessionRow[]>(response)).map(mapDashboardSession);
-}
-
-export async function requestLiveToken(sessionId?: string): Promise<LiveTokenResult> {
-  const response = await edgeFetch('live-token', { sessionId });
-  if (!response.ok) throw await responseError(response);
-
-  const data = await response.json();
-
-  if (data?.mode === 'text_fallback') {
-    return {
-      status: 'fallback',
-      message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
-    };
-  }
-
-  if (data?.mode === 'proxy_required') {
-    return {
-      status: 'proxy_required',
-      message: typeof data.reason === 'string' ? data.reason : 'Live coaching requires a backend WebSocket proxy.',
-    };
-  }
-
-  if (typeof data?.accessToken === 'string' && typeof data?.webSocketUrl === 'string') {
-    return {
-      status: 'ready',
-      webSocketUrl: data.webSocketUrl,
-      tokenExpiresAt: data.expiresAt,
-      message: 'Live token ready.',
-    };
-  }
-
-  if (typeof data?.ephemeralToken === 'string') {
-    return {
-      status: 'stub',
-      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
-      message: 'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
-    };
-  }
-
-  throw new Error('Unexpected live-token response from StudyPilot.');
 }
 
 export async function requestCoaching(
@@ -850,7 +857,7 @@ export async function syncStudySessionToSupabase(
 
 async function getDashboardChat(chatId: string): Promise<DashboardChatSummary> {
   const params = new URLSearchParams({
-    select: 'id,session_id,title,created_at,updated_at',
+    select: 'id,session_id,title,created_at,updated_at,rubric_id',
     id: `eq.${chatId}`,
     limit: '1',
   });
@@ -860,7 +867,8 @@ async function getDashboardChat(chatId: string): Promise<DashboardChatSummary> {
   if (!response.ok) throw await responseError(response);
   const rows = await parseJsonResponse<DashboardChatRow[]>(response);
   if (!rows[0]) throw new Error('The selected StudyPilot chat is no longer available.');
-  return mapDashboardChat(rows[0]);
+  const [chat] = await attachRubricMeta([mapDashboardChat(rows[0])]);
+  return chat;
 }
 
 async function getActiveRubricId(userId: string): Promise<string | null> {
@@ -992,6 +1000,7 @@ function mapDashboardChat(row: DashboardChatRow | undefined): DashboardChatSumma
     title: row.title?.trim() || 'New chat',
     createdAt: row.created_at ?? new Date(0).toISOString(),
     updatedAt: row.updated_at ?? row.created_at ?? new Date(0).toISOString(),
+    rubricId: row.rubric_id ?? null,
   };
 }
 

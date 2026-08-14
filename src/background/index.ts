@@ -3,7 +3,6 @@
 import { DASHBOARD_URL } from '@/shared/config';
 import {
   isStudyPilotRuntimeMessage,
-  type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
 import {
   clearExtensionSession,
@@ -13,7 +12,6 @@ import {
   getOrCreateSessionChat,
   getSharedChatContext,
   requestCoaching,
-  requestLiveToken,
   setActiveDashboardChat,
   storeExtensionSession,
   syncStudySessionToSupabase,
@@ -21,15 +19,32 @@ import {
 import type {
   CaptureVisibleTabResult,
   CoachingRequest,
+  LiveSessionStatus,
   PageContext,
 } from '@/shared/types';
+import {
+  getLiveStatusMessage,
+  handleOffscreenLiveMessage,
+  pauseLive,
+  restoreLivePersisted,
+  resumeLive,
+  startLive,
+  stopLive,
+} from './liveRuntime';
+import type { OffscreenToSwMessage } from '@/live/messages';
+import { isOffscreenMessage } from '@/live/messages';
 
 const CAPTURE_MAX_EDGE = 1024;
 const CAPTURE_JPEG_QUALITY = 0.72;
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[StudyPilot] Installed. Click the toolbar icon to toggle the panel on any http/https page.');
+  void restoreLivePersisted();
 });
+chrome.runtime.onStartup.addListener(() => {
+  void restoreLivePersisted();
+});
+void restoreLivePersisted();
 
 // The toolbar icon is the single entry point: it toggles the on-page panel.
 chrome.action.onClicked.addListener(tab => {
@@ -42,8 +57,6 @@ chrome.action.onClicked.addListener(tab => {
 });
 
 async function flashRefreshHint(tabId: number): Promise<void> {
-  // Content script is not on this page (chrome:// page, web store, or a tab
-  // opened before the extension was installed). Hint that a refresh is needed.
   try {
     await chrome.action.setBadgeBackgroundColor({ color: '#5b4df0' });
     await chrome.action.setBadgeText({ tabId, text: '↻' });
@@ -55,12 +68,47 @@ async function flashRefreshHint(tabId: number): Promise<void> {
   }
 }
 
+function toLiveSessionStatus(): LiveSessionStatus {
+  const status = getLiveStatusMessage();
+  if (status.type !== 'STUDYPILOT_LIVE_STATUS') {
+    return {
+      state: 'idle',
+      selectionFrozen: false,
+    };
+  }
+  return {
+    state: status.state,
+    selectionFrozen: status.selectionFrozen,
+    error: status.error,
+    warning: status.warning,
+    fallback: status.fallback,
+    rubric: status.rubric,
+    ragReady: status.ragReady,
+    chatId: status.selection.chatId,
+  };
+}
+
 chrome.runtime.onMessage.addListener(
   (
-    message: StudyPilotRuntimeMessage,
+    message: unknown,
     sender: chrome.runtime.MessageSender,
     sendResponse,
   ) => {
+    if (message && typeof message === 'object' && 'type' in message) {
+      const type = String((message as { type: string }).type);
+      if (isOffscreenMessage(type) || type.startsWith('OFFSCREEN_')) {
+        void handleOffscreenLiveMessage(message as OffscreenToSwMessage)
+          .then(() => sendResponse({ ok: true }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+      }
+    }
+
     if (!isStudyPilotRuntimeMessage(message)) return false;
 
     switch (message.type) {
@@ -185,9 +233,40 @@ chrome.runtime.onMessage.addListener(
           );
         return true;
 
-      case 'STUDYPILOT_GET_LIVE_TOKEN':
-        requestLiveToken(message.payload?.sessionId)
-          .then(data => sendResponse({ ok: true, data }))
+      case 'STUDYPILOT_LIVE_START': {
+        const page = getPageContextFromSender(sender);
+        startLive({
+          chatId: message.payload.chatId,
+          captureScreenshot: message.payload.captureScreenshot,
+          windowId: sender.tab?.windowId,
+          page: { title: page.sourceTitle, url: page.sourceUrl },
+        })
+          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+              data: toLiveSessionStatus(),
+            }),
+          );
+        return true;
+      }
+
+      case 'STUDYPILOT_LIVE_STOP':
+        stopLive('user_stop')
+          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+              data: toLiveSessionStatus(),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_LIVE_PAUSE':
+        pauseLive()
+          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
           .catch(error =>
             sendResponse({
               ok: false,
@@ -195,6 +274,21 @@ chrome.runtime.onMessage.addListener(
             }),
           );
         return true;
+
+      case 'STUDYPILOT_LIVE_RESUME':
+        resumeLive()
+          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+          .catch(error =>
+            sendResponse({
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        return true;
+
+      case 'STUDYPILOT_GET_LIVE_STATUS':
+        sendResponse({ ok: true, data: toLiveSessionStatus() });
+        return false;
 
       case 'STUDYPILOT_SAVE_SESSION':
         syncStudySessionToSupabase(

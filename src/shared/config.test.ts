@@ -23,8 +23,17 @@ describe('isLoopbackUrl', () => {
 
 describe('local extension environment', () => {
   it('preserves the dashboard hash route', () => {
-    const env = loadEnv('studypilot-local', process.cwd(), 'VITE_');
-
-    expect(env.VITE_DASHBOARD_URL).toBe('http://127.0.0.1:5173/#dashboard');
+    // Vite may have already put a truncated value into process.env when `#`
+    // was treated as a dotenv comment (unquoted URL). Clear so loadEnv
+    // re-reads the quoted mode file.
+    const previous = process.env.VITE_DASHBOARD_URL;
+    delete process.env.VITE_DASHBOARD_URL;
+    try {
+      const env = loadEnv('studypilot-local', process.cwd(), 'VITE_');
+      expect(env.VITE_DASHBOARD_URL).toBe('http://127.0.0.1:5173/#dashboard');
+    } finally {
+      if (previous === undefined) delete process.env.VITE_DASHBOARD_URL;
+      else process.env.VITE_DASHBOARD_URL = previous;
+    }
   });
 });

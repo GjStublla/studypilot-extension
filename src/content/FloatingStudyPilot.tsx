@@ -27,7 +27,9 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, Dispatch, ReactNode, SetStateAction } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
+  isLiveFanoutMessage,
   isStudyPilotRuntimeMessage,
+  panelRejectsSecrets,
   type StudyPilotRuntimeMessage,
 } from '@/shared/extensionMessages';
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
@@ -43,7 +45,8 @@ import {
   type DashboardSessionSummary,
   type ExtensionAuthSession,
   type ExtensionAuthState,
-  type LiveTokenResult,
+  type LiveSessionStatus,
+  type LiveUiState,
   type PageContext,
   type SharedChatContext,
   type StudyAction,
@@ -202,6 +205,9 @@ export function FloatingStudyPilot({
 
   const [micOn, setMicOn] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [liveState, setLiveState] = useState<LiveUiState>('idle');
+  const [liveFrozen, setLiveFrozen] = useState(false);
+  const [liveFallback, setLiveFallback] = useState<'text-coaching' | null>(null);
   const [phase, setPhase] = useState<StudyPhase>('idle');
   const [notice, setNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
@@ -267,6 +273,44 @@ export function FloatingStudyPilot({
     if (!isExtensionRuntime()) return;
 
     const listener = (message: unknown) => {
+      if (panelRejectsSecrets(message)) {
+        console.warn('[StudyPilot] Refusing panel message that appears to contain secrets.');
+        return false;
+      }
+      if (isLiveFanoutMessage(message)) {
+        if (message.type === 'STUDYPILOT_LIVE_STATUS') {
+          applyLiveStatus({
+            state: message.state,
+            selectionFrozen: message.selectionFrozen,
+            error: message.error,
+            warning: message.warning,
+            fallback: message.fallback ?? null,
+            rubric: message.rubric,
+            ragReady: message.ragReady,
+            chatId: message.selection.chatId,
+          });
+        } else if (message.type === 'STUDYPILOT_LIVE_WARNING' && message.message) {
+          flashNotice(message.message, 3600);
+        } else if (message.type === 'STUDYPILOT_LIVE_TRANSCRIPT' && message.finalized && message.text) {
+          setTranscript(prev => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: message.role === 'assistant' ? 'ai' : 'user',
+              text: message.text,
+              atSeconds: Math.floor(Date.now() / 1000),
+              sequence: prev.length + 1,
+              createdAt: new Date().toISOString(),
+            },
+          ]);
+          if (message.role === 'assistant') {
+            setCard({ title: 'Live coach', body: message.text });
+            setCardOpen(true);
+            setPhase('answer');
+          }
+        }
+        return false;
+      }
       if (!isStudyPilotRuntimeMessage(message)) return false;
       if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
       if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen(value => !value);
@@ -322,12 +366,17 @@ export function FloatingStudyPilot({
   }, []);
 
   const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
+  const liveBusy =
+    liveState === 'starting' ||
+    liveState === 'connecting' ||
+    liveState === 'live' ||
+    liveState === 'paused';
   const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
-  const orbState: OrbState = isActiveChatSending || phase === 'thinking'
+  const orbState: OrbState = isActiveChatSending || phase === 'thinking' || liveState === 'connecting' || liveState === 'starting'
     ? 'thinking'
-    : paused
+    : paused || liveState === 'paused'
       ? 'paused'
-      : micOn
+      : micOn || liveState === 'live'
         ? 'listening'
         : 'muted';
 
@@ -335,9 +384,15 @@ export function FloatingStudyPilot({
     ? notice
     : authState?.connected === false
       ? 'Connect dashboard'
+    : liveFallback === 'text-coaching'
+      ? 'Live unavailable — use text coaching'
+    : liveState === 'connecting' || liveState === 'starting'
+      ? 'Starting Live...'
+    : liveState === 'live'
+      ? 'Live coaching...'
     : isActiveChatSending || phase === 'thinking'
       ? 'Thinking...'
-      : paused
+      : paused || liveState === 'paused'
         ? 'Paused'
         : micOn
           ? 'Listening...'
@@ -352,6 +407,23 @@ export function FloatingStudyPilot({
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     setNotice(text);
     noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
+  }
+
+  function applyLiveStatus(status: LiveSessionStatus) {
+    setLiveState(status.state);
+    setLiveFrozen(status.selectionFrozen);
+    setLiveFallback(status.fallback ?? null);
+    const active =
+      status.state === 'live' ||
+      status.state === 'connecting' ||
+      status.state === 'starting' ||
+      status.state === 'paused';
+    setMicOn(active && status.state !== 'paused');
+    setPaused(status.state === 'paused');
+    if (status.warning) flashNotice(status.warning, 3600);
+    if (status.error && status.state === 'error') {
+      flashNotice(status.error, 4200);
+    }
   }
 
   async function refreshAuthState() {
@@ -472,6 +544,10 @@ export function FloatingStudyPilot({
   }
 
   async function selectDashboardChat(chatId: string | null) {
+    if (liveFrozen || liveBusy) {
+      flashNotice('Chat is locked while Live is active', 2600);
+      return;
+    }
     const refreshSequence = ++refreshSequenceRef.current;
     activeChatIdRef.current = chatId;
     setActiveChatId(chatId);
@@ -938,38 +1014,92 @@ export function FloatingStudyPilot({
   }
 
   function toggleMic() {
-    setMicOn(value => {
-      const next = !value;
-      if (next) {
-        setPaused(false);
-        void requestLiveAccess();
-      }
-      return next;
-    });
+    if (liveBusy && liveState !== 'paused') {
+      void stopLiveSession();
+      return;
+    }
+    if (liveState === 'paused') {
+      void resumeLiveSession();
+      return;
+    }
+    void startLiveSession();
   }
 
-  async function requestLiveAccess() {
+  async function startLiveSession() {
+    if (!activeChatId) {
+      flashNotice('Select a shared chat before starting Live', 3200);
+      return;
+    }
     try {
-      const response = await sendRuntimeMessage<LiveTokenResult>({
-        type: 'STUDYPILOT_GET_LIVE_TOKEN',
+      setMicOn(true);
+      setPaused(false);
+      setLiveFallback(null);
+      const response = await sendRuntimeMessage<LiveSessionStatus>({
+        type: 'STUDYPILOT_LIVE_START',
+        payload: {
+          chatId: activeChatId,
+          captureScreenshot: true,
+        },
       });
-
-      if (!response) {
+      if (response) applyLiveStatus(response);
+      else {
         setMicOn(false);
         flashNotice('Open the extension build for live coach');
-        return;
       }
-
-      if (response.status === 'stub' || response.status === 'fallback') {
-        setMicOn(false);
-      }
-
-      flashNotice(response.message, 3600);
-      await refreshAuthState();
     } catch (error) {
       setMicOn(false);
+      setLiveFallback('text-coaching');
       const message = error instanceof Error ? error.message : 'Live coach unavailable';
-      flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Live coach unavailable', 3200);
+      flashNotice(
+        message.includes('connected')
+          ? 'Connect dashboard first'
+          : `${message} — use text coaching instead`,
+        4200,
+      );
+    }
+  }
+
+  async function stopLiveSession() {
+    try {
+      const response = await sendRuntimeMessage<LiveSessionStatus>({
+        type: 'STUDYPILOT_LIVE_STOP',
+      });
+      if (response) applyLiveStatus(response);
+      else {
+        setMicOn(false);
+        setPaused(false);
+        setLiveState('idle');
+        setLiveFrozen(false);
+      }
+    } catch (error) {
+      flashNotice(error instanceof Error ? error.message : 'Could not stop Live', 3200);
+    }
+  }
+
+  async function pauseLiveSession() {
+    try {
+      const response = await sendRuntimeMessage<LiveSessionStatus>({
+        type: 'STUDYPILOT_LIVE_PAUSE',
+      });
+      if (response) applyLiveStatus(response);
+      else setPaused(true);
+    } catch {
+      flashNotice('Could not pause Live', 2600);
+    }
+  }
+
+  async function resumeLiveSession() {
+    try {
+      const response = await sendRuntimeMessage<LiveSessionStatus>({
+        type: 'STUDYPILOT_LIVE_RESUME',
+      });
+      if (response) applyLiveStatus(response);
+      else {
+        setPaused(false);
+        setMicOn(true);
+      }
+    } catch {
+      flashNotice('Could not resume Live', 2600);
     }
   }
 
@@ -1109,20 +1239,39 @@ export function FloatingStudyPilot({
                   <select
                     aria-label="Shared StudyPilot chat"
                     value={activeChatId ?? ''}
+                    disabled={liveFrozen || liveBusy}
                     onChange={event => void selectDashboardChat(event.target.value || null)}
                   >
                     <option value="">New chat draft</option>
                     {(sharedContext?.chats ?? []).map(chat => (
-                      <option key={chat.id} value={chat.id}>{chat.title}</option>
+                      <option key={chat.id} value={chat.id}>
+                        {chat.title}
+                        {chat.rubricTitle
+                          ? ` · ${chat.rubricTitle}${chat.ragReady ? ' ✓' : chat.rubricFileSearchStatus ? ` (${chat.rubricFileSearchStatus})` : ''}`
+                          : ''}
+                      </option>
                     ))}
                   </select>
                 </label>
+                {activeChat?.rubricTitle ? (
+                  <span
+                    className="sp-chat-tool"
+                    title={
+                      activeChat.ragReady
+                        ? `Rubric ready: ${activeChat.rubricTitle}`
+                        : `Rubric: ${activeChat.rubricTitle} (${activeChat.rubricFileSearchStatus ?? 'pending'})`
+                    }
+                    aria-label="Rubric status"
+                  >
+                    <ShieldCheck size={15} data-ready={activeChat.ragReady ? 'true' : 'false'} />
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="sp-chat-tool"
                   aria-label="Create new chat"
                   title="New chat"
-                  disabled={isCreatingChat}
+                  disabled={isCreatingChat || liveFrozen || liveBusy}
                   onClick={() => {
                     void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
                   }}
@@ -1134,7 +1283,7 @@ export function FloatingStudyPilot({
                   className="sp-chat-tool"
                   aria-label="Refresh shared chats"
                   title="Refresh chats"
-                  disabled={isRefreshingChats}
+                  disabled={isRefreshingChats || liveFrozen || liveBusy}
                   onClick={() => void refreshSharedChatContext(activeChatIdRef.current)}
                 >
                   <RefreshCw size={15} data-spinning={isRefreshingChats} />
@@ -1166,11 +1315,21 @@ export function FloatingStudyPilot({
                   <Volume2 size={22} />
                 </RoundButton>
                 <RoundButton
-                  active={false}
-                  label={paused ? 'Resume session' : 'Pause session'}
-                  onClick={() => setPaused(value => !value)}
+                  active={paused || liveState === 'paused'}
+                  label={paused || liveState === 'paused' ? 'Resume session' : 'Pause session'}
+                  onClick={() => {
+                    if (liveState === 'paused') {
+                      void resumeLiveSession();
+                      return;
+                    }
+                    if (liveBusy) {
+                      void pauseLiveSession();
+                      return;
+                    }
+                    setPaused(value => !value);
+                  }}
                 >
-                  {paused ? <Play size={22} /> : <Pause size={22} />}
+                  {paused || liveState === 'paused' ? <Play size={22} /> : <Pause size={22} />}
                 </RoundButton>
                 <RoundButton
                   active={settingsOpen}

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Study Pilot",
   "short_name": "Study Pilot",
-  "version": "0.2.0",
-  "description": "A voice-first study companion. One panel for asking about the page, quick study actions, and saving explanations.",
+  "version": "0.3.0",
+  "description": "A voice-first study companion. One panel for asking about the page, Live coaching, and saving explanations.",
   "minimum_chrome_version": "116",
   "action": {
     "default_title": "Toggle Study Pilot"
@@ -19,15 +19,27 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["activeTab", "storage"],
+  "permissions": ["activeTab", "storage", "offscreen", "tabs"],
   "host_permissions": [
     "https://*.supabase.co/*",
     "https://studypilot.app/*",
-    "https://*.studypilot.ai/*"
+    "https://*.studypilot.ai/*",
+    "https://generativelanguage.googleapis.com/*",
+    "wss://generativelanguage.googleapis.com/*",
+    "https://*.aiplatform.googleapis.com/*",
+    "wss://*.aiplatform.googleapis.com/*",
+    "https://us-aiplatform.googleapis.com/*",
+    "wss://us-aiplatform.googleapis.com/*",
+    "https://eu-aiplatform.googleapis.com/*",
+    "wss://eu-aiplatform.googleapis.com/*"
   ],
   "web_accessible_resources": [
     {
-      "resources": ["fonts/*.woff2"],
+      "resources": [
+        "fonts/*.woff2",
+        "audio-worklet.js",
+        "src/offscreen.html"
+      ],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

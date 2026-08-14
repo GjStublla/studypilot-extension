@@ -67,6 +67,10 @@ export interface DashboardChatSummary {
   title: string;
   createdAt: string;
   updatedAt: string;
+  rubricId?: string | null;
+  rubricTitle?: string | null;
+  rubricFileSearchStatus?: string | null;
+  ragReady?: boolean;
 }
 
 export interface DashboardSessionSummary {
@@ -173,12 +177,29 @@ export interface StudyTranscriptTurn {
   createdAt?: string;
 }
 
-export type LiveTokenStatus = 'stub' | 'ready' | 'fallback' | 'proxy_required';
+export type LiveUiState =
+  | 'idle'
+  | 'starting'
+  | 'connecting'
+  | 'live'
+  | 'paused'
+  | 'stopping'
+  | 'error';
 
-export interface LiveTokenResult {
-  status: LiveTokenStatus;
-  expiresAt?: string;
-  webSocketUrl?: string;
-  tokenExpiresAt?: string;
-  message: string;
+export type LiveTokenStatus = 'ready' | 'fallback' | 'error';
+
+export interface LiveSessionStatus {
+  state: LiveUiState;
+  selectionFrozen: boolean;
+  error?: string | null;
+  warning?: string | null;
+  fallback?: 'text-coaching' | null;
+  rubric?: {
+    id: string;
+    title: string;
+    fileSearchStatus?: string | null;
+    criteriaCount?: number;
+  } | null;
+  ragReady?: boolean;
+  chatId?: string | null;
 }
