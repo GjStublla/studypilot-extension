@@ -18,6 +18,7 @@ import type {
   DashboardSessionSummary,
   ExtensionAuthSession,
   ExtensionAuthState,
+  LiveTokenResult,
   SharedChatContext,
   StudyFolder,
   StudyPilotSessionMode,
@@ -490,6 +491,47 @@ export async function getAuthStatus(): Promise<ExtensionAuthState> {
   }
 }
 
+/** Legacy live-token endpoint retained for clients that still use the proxy flow. */
+export async function requestLiveToken(sessionId?: string): Promise<LiveTokenResult> {
+  const response = await edgeFetch('live-token', { sessionId });
+  if (!response.ok) throw await responseError(response);
+
+  const data = await response.json();
+  if (data?.mode === 'text_fallback') {
+    return {
+      status: 'fallback',
+      message: typeof data.reason === 'string'
+        ? data.reason
+        : 'Live coaching is unavailable; use text coaching.',
+    };
+  }
+  if (data?.mode === 'proxy_required') {
+    return {
+      status: 'proxy_required',
+      message: typeof data.reason === 'string'
+        ? data.reason
+        : 'Live coaching requires a backend WebSocket proxy.',
+    };
+  }
+  if (typeof data?.accessToken === 'string' && typeof data?.webSocketUrl === 'string') {
+    return {
+      status: 'ready',
+      webSocketUrl: data.webSocketUrl,
+      tokenExpiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
+      message: 'Live token ready.',
+    };
+  }
+  if (typeof data?.ephemeralToken === 'string') {
+    return {
+      status: 'stub',
+      expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
+      message: 'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
+    };
+  }
+
+  throw new Error('Unexpected live-token response from StudyPilot.');
+}
+
 export async function getSharedChatContext(): Promise<SharedChatContext> {
   const auth = await ensureAuthenticatedSession();
   const [chats, sessions] = await Promise.all([
@@ -651,7 +693,7 @@ export async function requestCoaching(
   if (!response.body) throw new Error('StudyPilot AI returned an empty stream.');
 
   const streamed = await parseCoachingSseStream(response.body, {
-    chatId: request.chatId,
+    chatId: request.chatId ?? '',
     requestId: request.requestId,
   });
 

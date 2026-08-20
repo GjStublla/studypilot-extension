@@ -32,6 +32,7 @@ export type StudyPilotRuntimeMessage =
   | { type: 'STUDYPILOT_LIVE_PAUSE' }
   | { type: 'STUDYPILOT_LIVE_RESUME' }
   | { type: 'STUDYPILOT_GET_LIVE_STATUS' }
+  | { type: 'STUDYPILOT_GET_LIVE_TOKEN'; payload?: { sessionId?: string } }
   | {
       type: 'STUDYPILOT_SAVE_SESSION';
       payload: { chatId: string; session: StudySession; finalize?: boolean };

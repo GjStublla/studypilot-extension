@@ -22,6 +22,8 @@ export interface PageContext {
   sourceTitle: string;
   host: string;
   selectedText?: string;
+  /** Extracted readable text from the page body (capped at ~6000 chars). */
+  pageText?: string;
 }
 
 export interface ContextShareSettings {
@@ -111,6 +113,7 @@ export interface CaptureVisibleTabResult {
 
 export interface ExtensionAuthSession {
   access_token: string;
+  refresh_token?: string;
   user_id?: string;
   email?: string | null;
   expires_at?: number;
@@ -124,7 +127,7 @@ export interface ExtensionAuthState {
 }
 
 export interface CoachingRequest {
-  chatId: string;
+  chatId?: string;
   requestId: string;
   action: StudyAction;
   question?: string;
@@ -187,6 +190,15 @@ export type LiveUiState =
   | 'error';
 
 export type LiveTokenStatus = 'ready' | 'fallback' | 'error';
+
+export type LiveTokenResult =
+  | {
+      status: 'ready';
+      webSocketUrl: string;
+      tokenExpiresAt?: string;
+      message: string;
+    }
+  | { status: 'fallback' | 'proxy_required' | 'stub'; message: string; expiresAt?: string };
 
 export interface LiveSessionStatus {
   state: LiveUiState;

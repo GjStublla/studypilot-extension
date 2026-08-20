@@ -1,5 +1,22 @@
-export const DASHBOARD_URL =
-  import.meta.env.VITE_DASHBOARD_URL || 'https://app.studypilot.ai/sessions';
+function resolveDashboardUrl() {
+  const configured = import.meta.env.VITE_DASHBOARD_URL?.trim();
+  if (configured) return configured;
+
+  const localCandidates = [
+    'http://localhost:5173/sessions',
+    'http://127.0.0.1:5173/sessions',
+  ];
+
+  return localCandidates.find(candidate => {
+    try {
+      return new URL(candidate).hostname === 'localhost' || new URL(candidate).hostname === '127.0.0.1';
+    } catch {
+      return false;
+    }
+  }) ?? 'https://app.studypilot.ai/sessions';
+}
+
+export const DASHBOARD_URL = resolveDashboardUrl();
 
 export const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '');
 export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -33,4 +50,4 @@ const localEndpointsConfigured =
 export const LOCAL_DEV_MODE = localModeRequested && localEndpointsConfigured;
 
 export const STUDYPILOT_CONNECT_MESSAGE =
-  'StudyPilot is not connected yet. Open the dashboard, sign in, then connect the extension session.';
+  'StudyPilot is not connected yet. Open the web app to sign in and connect the extension automatically.';
