@@ -151,6 +151,8 @@ npx playwright test
 
 `npx playwright test` is the same as `npm run test:e2e`. It loads unpacked `dist/` with `--disable-extensions-except` and `--load-extension`. If Chromium is missing, install only Chromium (`npx playwright install chromium`). Do not commit browser binaries.
 
+Playwright cannot click the Chrome toolbar icon. The toolbar-equivalent spec sends the same `STUDYPILOT_TOGGLE_MODAL` message that `chrome.action.onClicked` sends, from `src/offscreen.html`, because `serviceWorker.evaluate` does not expose `chrome.tabs` in this Playwright version. That covers the content-script toggle path, not a real toolbar click. Microphone denial is asserted on the in-page voice fallback; Live offscreen `getUserMedia` still needs a user gesture in Chrome.
+
 To watch the browser: `$env:PW_HEADED=1; npx playwright test`
 
 CI (Linux or GitHub Actions):
