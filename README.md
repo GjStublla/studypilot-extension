@@ -122,14 +122,58 @@ A standalone UI preview (no extension runtime needed) is served at `http://127.0
 
 ## Permissions
 
-- `activeTab`: allows the panel to capture the visible tab after explicit user action or when screenshot sharing is enabled for a coaching request.
-- `storage`: stores only the user's Supabase access token for the extension session.
-- `https://*.supabase.co/*`: lets the background worker call Supabase Data API and Edge Functions with the user's access token.
-- `https://*.aiplatform.googleapis.com/*` and `wss://*.aiplatform.googleapis.com/*` (plus `us-` / `eu-aiplatform` hosts): Vertex Live WebSocket from `live-token.websocketUrl`. Generativelanguage hosts remain for the legacy Gemini ephemeral fallback.
-- Content script matches `http://*/*` and `https://*/*` so the panel can appear on normal study pages. The extension does not request broad `<all_urls>` host permissions.
-- `web_accessible_resources` exposes only the bundled font files so the panel can render its typeface from inside the shadow root.
+Named MV3 permissions:
 
-The extension does not include server-side API keys, analytics, remote executable scripts, or silent data collection.
+- `offscreen`: required so Live can call `getUserMedia` from an offscreen document. Chrome does not support a named `microphone` permission; this package does not request one.
+- `storage`: extension settings, session bridge state, and Live resumption handles.
+- `tabs`: query tabs so Live status can fan out, `captureVisibleTab` for optional screenshots, `tabs.create` for dashboard handoff, and `tabs.sendMessage` for the toolbar toggle.
+- `activeTab`: `chrome.tabs.captureVisibleTab` after a user gesture on pages that are not covered by host permissions. The extension does not use `chrome.scripting` and does not request `scripting`.
+
+Host permissions stay limited to the APIs the background worker actually calls: Supabase (`https://*.supabase.co/*`), StudyPilot (`https://studypilot.app/*`, `https://*.studypilot.ai/*`), Gemini/Generative Language, and Vertex AI. `npm run build` never adds loopback hosts. Use `npm run build:local` when the dashboard and Supabase are on localhost.
+
+Content scripts still match `http://*/*` and `https://*/*` so the panel can appear on normal study pages. **Chrome will warn that this extension can read and change data on all websites.** That warning is expected for this beta. The extension does not add a matching `<all_urls>` host permission.
+
+`web_accessible_resources` exposes bundled fonts, `audio-worklet.js`, and the offscreen document. The package does not include server-side API keys, analytics, remote executable scripts, or silent data collection.
+
+## Test and validate
+
+Windows (PowerShell):
+
+```powershell
+npm install
+npm run typecheck
+npm test
+npm run build
+npm run validate:manifest
+npx playwright install chromium
+npx playwright test
+```
+
+`npx playwright test` is the same as `npm run test:e2e`. It loads unpacked `dist/` with `--disable-extensions-except` and `--load-extension`. If Chromium is missing, install only Chromium (`npx playwright install chromium`). Do not commit browser binaries.
+
+To watch the browser: `$env:PW_HEADED=1; npx playwright test`
+
+CI (Linux or GitHub Actions):
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run validate:manifest
+npx playwright install --with-deps chromium
+npx playwright test
+```
+
+`npm run validate:manifest` fails if `dist/manifest.json` names a `microphone` permission, lists loopback host permissions, omits `offscreen`, or if runtime code has no `USER_MEDIA` offscreen reason.
+
+Unpacked load in Chrome:
+
+1. `npm run build`
+2. Open `chrome://extensions`, enable Developer mode, Load unpacked, select `dist`.
+3. Chrome should show no manifest error for `microphone`. The all-sites content-script warning remains. After a user gesture, Live still uses the offscreen document for microphone capture.
+
+This repo does not automate `chrome://extensions` itself. Treat a Playwright pass as unpacked-load evidence; do not claim a separate manual Chrome UI pass unless a human recorded one.
 
 ## Supabase AI Integration
 

@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { crx } from '@crxjs/vite-plugin';
@@ -52,16 +53,7 @@ export default defineConfig(({ mode }) => {
           'http://localhost/*',
         ],
       }
-    : isLoopbackUrl(env.VITE_DASHBOARD_URL)
-      ? {
-          ...manifest,
-          host_permissions: [
-            ...manifest.host_permissions,
-            'http://127.0.0.1/*',
-            'http://localhost/*',
-          ],
-        }
-      : manifest;
+    : manifest;
 
   return {
     plugins: [react(), crx({ manifest: buildManifest })],
@@ -77,6 +69,14 @@ export default defineConfig(({ mode }) => {
       },
     },
     publicDir: 'public',
+    test: {
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/dist-local/**',
+        '**/e2e/**',
+      ],
+    },
     server: {
       port: 5179,
       strictPort: true,

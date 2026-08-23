@@ -18,5 +18,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "manifest.json"]
+  "include": ["vite.config.ts", "playwright.config.ts", "manifest.json"]
 }
