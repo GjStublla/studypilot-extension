@@ -1,6 +1,10 @@
 # Study Pilot Extension
 
-Study Pilot is a Chrome Manifest V3 extension for a voice-first study companion, including **Gemini Live** coaching. Everything lives in a single on-page panel: the glowing listening orb, voice controls, quick study actions, the latest explanation, and session settings. There is no separate popup UI.
+StudyPilot is a rubric-aware coaching loop across the browser and dashboard: it uses the page, the student's question, and an uploaded rubric to coach the next improvement, then carries the conversation and action items into the dashboard.
+
+This Manifest V3 extension is the on-page panel. It uses your microphone and the page context you choose to share. Answers can cite retrieved rubric or uploaded-document evidence when grounding is available. Sign in once to connect the extension and dashboard.
+
+Live microphone audio is processed by Google Vertex AI while Live is active. Screenshots are sent only when you enable them. Chat and session history save only when “Save to dashboard” is on. There is no separate popup UI.
 
 > **This repository (`studypilot-extension`) is the canonical Chrome extension.**  
 > The sibling `studypilot/extension` folder is a Live scaffold/mirror only — do not treat it as the shipping source of truth.
@@ -17,7 +21,7 @@ same conversation without duplicating client-side history.
 
 **Live coaching** (mic button):
 
-1. Resolve selected shared chat → capture tab JPEG → `POST live-token`
+1. Resolve selected shared chat → optional tab JPEG when screenshot sharing is on → `POST live-token`
 2. Service worker hands the Vertex OAuth `accessToken` + `websocketUrl` **only** to an offscreen document (never the content panel)
 3. Offscreen connects to Vertex `BidiGenerateContent` (`apiVersion` from live-token, typically `v1beta1`) with `?access_token=` (browsers cannot set WS Authorization headers) and `historyConfig.initialHistoryInClientContent: true`
 4. Seeds chat via `clientContent` using `initialTurns` from `live-token` (not a stub `[]`)
@@ -28,7 +32,7 @@ same conversation without duplicating client-side history.
 9. On Gemini `GoAway` (or unexpected close), reconnect with the stored session resumption handle — do **not** reseed history/screenshot
 10. Audio interrupt clears the PCM queue **and** stops already-scheduled Web Audio buffer sources
 
-Automatic session save creates a same-ID session for an unlinked chat, preserves
+When **Save to dashboard** is enabled, session save creates a same-ID session for an unlinked chat, preserves
 the provenance and duration of an existing linked session, inserts canonical
 message ids into `session_messages` idempotently, and upserts the latest
 screenshot in the private `session-captures` bucket. The explicit Save action

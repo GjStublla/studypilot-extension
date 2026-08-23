@@ -3207,7 +3207,7 @@ function WebAppConnectView({
       </div>
       <div className="sp-login-form">
         <p className="sp-login-error" style={{ margin: 0 }}>
-          Open the StudyPilot web app, sign in, and this extension will connect automatically.
+          Sign in once to connect the extension and dashboard. Open the StudyPilot web app and this panel will connect automatically.
         </p>
         <button type="button" className="sp-login-btn" onClick={onOpenDashboard}>
           Open web app

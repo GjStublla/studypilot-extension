@@ -3,7 +3,7 @@
   "name": "Study Pilot",
   "short_name": "Study Pilot",
   "version": "0.3.0",
-  "description": "A voice-first study companion. One panel for asking about the page, Live coaching, and saving explanations.",
+  "description": "StudyPilot is a rubric-aware study coach across your browser and dashboard.",
   "minimum_chrome_version": "116",
   "action": {
     "default_title": "Toggle Study Pilot"

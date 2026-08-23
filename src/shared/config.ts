@@ -50,4 +50,4 @@ const localEndpointsConfigured =
 export const LOCAL_DEV_MODE = localModeRequested && localEndpointsConfigured;
 
 export const STUDYPILOT_CONNECT_MESSAGE =
-  'StudyPilot is not connected yet. Open the web app to sign in and connect the extension automatically.';
+  'StudyPilot is not connected yet. Sign in once to connect the extension and dashboard.';
