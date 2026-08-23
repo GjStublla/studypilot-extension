@@ -42,7 +42,9 @@ import {
 } from '@/shared/extensionMessages';
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
 import {
+  DEFAULT_CONTEXT_SHARE_SETTINGS,
   STUDY_FOLDERS,
+  sessionPrivacyFromContext,
   type CoachingImage,
   type CoachingRequest,
   type CoachingResponse,
@@ -298,13 +300,9 @@ export function FloatingStudyPilot({
   const confettiRef = useRef<HTMLCanvasElement | null>(null);
   const [pomodoroPickerOpen, setPomodoroPickerOpen] = useState(false);
 
-  const [context, setContext] = useState<ContextShareSettings>({
-    screenshot: false,
-    pageUrl: true,
-    selectedText: false,
-    saveToDashboard: true,
-    folder: 'Biology 101',
-  });
+  const [context, setContext] = useState<ContextShareSettings>(
+    DEFAULT_CONTEXT_SHARE_SETTINGS,
+  );
 
   // ── Drag-to-reposition ───────────────────────────────────────────────────────
   // null = use default CSS (bottom-right). Once the user drags, we switch to
@@ -1622,7 +1620,7 @@ export function FloatingStudyPilot({
         type: 'STUDYPILOT_LIVE_START',
         payload: {
           chatId: activeChatId,
-          captureScreenshot: true,
+          privacy: sessionPrivacyFromContext(context),
         },
       });
       if (response) applyLiveStatus(response);
@@ -2926,7 +2924,7 @@ function QuickChip({
   );
 }
 
-function SettingsSheet({
+export function SettingsSheet({
   page,
   context,
   onChange,
@@ -2955,27 +2953,46 @@ function SettingsSheet({
         <span>Shared when you ask or save</span>
       </div>
 
-      <div className="sp-settings-toggles">
-        <TogglePill
-          label={context.screenshot ? 'Screenshot on' : 'No screenshot'}
-          checked={context.screenshot}
-          onChange={setFlag('screenshot')}
-        />
-        <TogglePill
-          label="Page URL"
-          checked={context.pageUrl}
-          onChange={setFlag('pageUrl')}
-        />
-        <TogglePill
-          label={page.selectedText ? 'Selected text' : 'No selection'}
-          checked={context.selectedText}
-          onChange={setFlag('selectedText')}
-        />
-        <TogglePill
-          label="Auto-save"
-          checked={context.saveToDashboard}
-          onChange={setFlag('saveToDashboard')}
-        />
+      <p className="sp-settings-copy">
+        Microphone audio is sent to Google Vertex AI while Live is active.
+        Screenshots are sent only when enabled. Chat and session history
+        save only when “Save to dashboard” is enabled.
+      </p>
+
+      <div className="sp-settings-group">
+        <p className="sp-settings-group-label">Page context</p>
+        <div className="sp-settings-toggles">
+          <TogglePill
+            name="pageUrl"
+            label="Page URL"
+            checked={context.pageUrl}
+            onChange={setFlag('pageUrl')}
+          />
+          <TogglePill
+            name="selectedText"
+            label={page.selectedText ? 'Selected text' : 'No selection'}
+            checked={context.selectedText}
+            onChange={setFlag('selectedText')}
+          />
+        </div>
+      </div>
+
+      <div className="sp-settings-group">
+        <p className="sp-settings-group-label">Capture and saving</p>
+        <div className="sp-settings-toggles">
+          <TogglePill
+            name="screenshot"
+            label={context.screenshot ? 'Screenshot on' : 'No screenshot'}
+            checked={context.screenshot}
+            onChange={setFlag('screenshot')}
+          />
+          <TogglePill
+            name="saveToDashboard"
+            label="Save to dashboard"
+            checked={context.saveToDashboard}
+            onChange={setFlag('saveToDashboard')}
+          />
+        </div>
       </div>
 
       <div className="sp-settings-row">
@@ -3007,17 +3024,24 @@ function SettingsSheet({
 }
 
 function TogglePill({
+  name,
   label,
   checked,
   onChange,
 }: {
+  name: string;
   label: string;
   checked: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
 }) {
   return (
     <label className="sp-toggle" data-checked={checked}>
-      <input type="checkbox" checked={checked} onChange={onChange} />
+      <input
+        type="checkbox"
+        name={name}
+        checked={checked}
+        onChange={onChange}
+      />
       <span>{label}</span>
     </label>
   );

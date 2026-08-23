@@ -10,9 +10,11 @@ import type {
   ExtensionAuthState,
   LiveSessionStatus,
   PageContext,
+  SessionPrivacyOptions,
   SharedChatContext,
   StudySession,
 } from './types';
+import { isSessionPrivacyOptions } from './types';
 import type { SwToPanelLiveMessage } from '@/live/messages';
 
 export type StudyPilotRuntimeMessage =
@@ -27,7 +29,7 @@ export type StudyPilotRuntimeMessage =
   | { type: 'STUDYPILOT_CONTINUE_SESSION'; payload: { sessionId: string; title: string } }
   | { type: 'STUDYPILOT_SELECT_CHAT'; payload: { chatId: string | null } }
   | { type: 'STUDYPILOT_REQUEST_COACHING'; payload: CoachingRequest }
-  | { type: 'STUDYPILOT_LIVE_START'; payload: { chatId: string; captureScreenshot?: boolean } }
+  | { type: 'STUDYPILOT_LIVE_START'; payload: { chatId: string; privacy: SessionPrivacyOptions } }
   | { type: 'STUDYPILOT_LIVE_STOP' }
   | { type: 'STUDYPILOT_LIVE_PAUSE' }
   | { type: 'STUDYPILOT_LIVE_RESUME' }
@@ -57,6 +59,31 @@ export type CaptureVisibleTabResponse =
   StudyPilotResponse<CaptureVisibleTabResult>;
 export type SaveSessionResponse = StudyPilotResponse<DashboardSaveResult>;
 export type OpenDashboardResponse = StudyPilotResponse<{ opened: true }>;
+
+export function parseLiveStartPayload(payload: unknown): {
+  chatId: string;
+  privacy: SessionPrivacyOptions;
+} {
+  if (typeof payload !== 'object' || payload === null) {
+    throw new Error('Live start requires a chatId and privacy options.');
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.chatId !== 'string' || record.chatId.trim() === '') {
+    throw new Error('Live start requires a chatId.');
+  }
+  if (!isSessionPrivacyOptions(record.privacy)) {
+    throw new Error(
+      'Live start requires privacy.captureScreenshot and privacy.saveToDashboard as booleans.',
+    );
+  }
+  return {
+    chatId: record.chatId,
+    privacy: {
+      captureScreenshot: record.privacy.captureScreenshot,
+      saveToDashboard: record.privacy.saveToDashboard,
+    },
+  };
+}
 
 export function isStudyPilotRuntimeMessage(
   message: unknown,

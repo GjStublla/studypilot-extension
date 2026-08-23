@@ -3,6 +3,7 @@
 import { DASHBOARD_URL } from '@/shared/config';
 import {
   isStudyPilotRuntimeMessage,
+  parseLiveStartPayload,
 } from '@/shared/extensionMessages';
 import {
   clearExtensionSession,
@@ -192,10 +193,20 @@ chrome.runtime.onMessage.addListener(
         return true;
 
       case 'STUDYPILOT_LIVE_START': {
+        let parsed: ReturnType<typeof parseLiveStartPayload>;
+        try {
+          parsed = parseLiveStartPayload(message.payload);
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return false;
+        }
         const page = getPageContextFromSender(sender);
         startLive({
-          chatId: message.payload.chatId,
-          captureScreenshot: message.payload.captureScreenshot,
+          chatId: parsed.chatId,
+          privacy: parsed.privacy,
           windowId: sender.tab?.windowId,
           page: { title: page.sourceTitle, url: page.sourceUrl },
         })

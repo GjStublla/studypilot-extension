@@ -34,6 +34,45 @@ export interface ContextShareSettings {
   folder: StudyFolder;
 }
 
+/** Live-session capture and persistence choices. Independent of page URL / selected text. */
+export interface SessionPrivacyOptions {
+  captureScreenshot: boolean;
+  saveToDashboard: boolean;
+}
+
+export const DEFAULT_SESSION_PRIVACY: SessionPrivacyOptions = {
+  captureScreenshot: false,
+  saveToDashboard: false,
+};
+
+export const DEFAULT_CONTEXT_SHARE_SETTINGS: ContextShareSettings = {
+  screenshot: DEFAULT_SESSION_PRIVACY.captureScreenshot,
+  pageUrl: true,
+  selectedText: false,
+  saveToDashboard: DEFAULT_SESSION_PRIVACY.saveToDashboard,
+  folder: 'Biology 101',
+};
+
+export function isSessionPrivacyOptions(
+  value: unknown,
+): value is SessionPrivacyOptions {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.captureScreenshot === 'boolean' &&
+    typeof record.saveToDashboard === 'boolean'
+  );
+}
+
+export function sessionPrivacyFromContext(
+  context: Pick<ContextShareSettings, 'screenshot' | 'saveToDashboard'>,
+): SessionPrivacyOptions {
+  return {
+    captureScreenshot: context.screenshot,
+    saveToDashboard: context.saveToDashboard,
+  };
+}
+
 export interface StudySession {
   id: string;
   title: string;

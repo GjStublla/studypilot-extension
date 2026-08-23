@@ -26,6 +26,8 @@ import type {
   SwToPanelLiveMessage,
 } from '@/live/messages';
 import { sanitizeForPanel } from '@/live/messages';
+import type { SessionPrivacyOptions } from '@/shared/types';
+import { DEFAULT_SESSION_PRIVACY } from '@/shared/types';
 
 const OFFSCREEN_URL = 'src/offscreen.html';
 const OFFSCREEN_REASONS: chrome.offscreen.Reason[] = [
@@ -57,6 +59,7 @@ type RuntimeLive = {
   pendingTurns: PendingTurn[];
   rubric: LiveTokenResponse['rubric'];
   ragReady: boolean;
+  privacy: SessionPrivacyOptions;
   /** True while GoAway / unexpected-close reconnect is in flight — ignore transient closed. */
   reconnecting: boolean;
   reconnectAttempts: number;
@@ -76,6 +79,7 @@ const live: RuntimeLive = {
   pendingTurns: [],
   rubric: null,
   ragReady: false,
+  privacy: { ...DEFAULT_SESSION_PRIVACY },
   reconnecting: false,
   reconnectAttempts: 0,
 };
@@ -286,7 +290,7 @@ async function reconnectWithResumption(trigger: 'go_away' | 'closed'): Promise<v
     const tokenRes = await fetchLiveToken({
       liveSessionId,
       chatId,
-      saveToDashboard: true,
+      saveToDashboard: live.privacy.saveToDashboard,
       mode: 'Study Coach',
       quotaRequestId: liveSessionId,
     });
@@ -360,7 +364,7 @@ export function getLiveStatusMessage(): SwToPanelLiveMessage {
 
 export async function startLive(opts: {
   chatId: string;
-  captureScreenshot?: boolean;
+  privacy: SessionPrivacyOptions;
   windowId?: number;
   page?: { title?: string; url?: string };
 }): Promise<SwToPanelLiveMessage> {
@@ -399,22 +403,25 @@ export async function startLive(opts: {
     const liveSessionId = crypto.randomUUID();
     live.liveSessionId = liveSessionId;
     live.startedAtMs = Date.now();
+    live.privacy = {
+      captureScreenshot: opts.privacy.captureScreenshot,
+      saveToDashboard: opts.privacy.saveToDashboard,
+    };
 
     // Each LIVE_START creates a new live_chat_sessions row — always seed history.
     // Session resumption reconnects (same Live) skip reseeding; we do not reseed here.
     const seed = true;
     live.resumptionHandle = null;
-    const screenshot =
-      opts.captureScreenshot !== false
-        ? await captureActiveTabJpeg(opts.windowId)
-        : null;
+    const screenshot = opts.privacy.captureScreenshot
+      ? await captureActiveTabJpeg(opts.windowId)
+      : null;
 
     await setState({ state: 'connecting' });
 
     const tokenRes = await fetchLiveToken({
       liveSessionId,
       chatId: opts.chatId,
-      saveToDashboard: true,
+      saveToDashboard: opts.privacy.saveToDashboard,
       page: opts.page,
       mode: 'Study Coach',
       quotaRequestId: liveSessionId,

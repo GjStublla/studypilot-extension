@@ -6,6 +6,8 @@
  * carry accessToken / ephemeralToken / bootstrap / websocketUrl.
  */
 
+import type { SessionPrivacyOptions } from '@/shared/types';
+
 export type LiveUiState =
   | 'idle'
   | 'starting'
@@ -58,7 +60,7 @@ export type TranscriptRole = 'user' | 'assistant';
 export type PanelLiveControlMessage =
   | { type: 'STUDYPILOT_LIVE_START'; payload: {
       chatId: string;
-      captureScreenshot?: boolean;
+      privacy: SessionPrivacyOptions;
     } }
   | { type: 'STUDYPILOT_LIVE_STOP' }
   | { type: 'STUDYPILOT_LIVE_PAUSE' }
