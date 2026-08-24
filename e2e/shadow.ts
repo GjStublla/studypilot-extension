@@ -136,6 +136,22 @@ export async function shadowText(page: Page, selector: string): Promise<string> 
   }
 }
 
+export async function focusShadow(page: Page, selector: string): Promise<void> {
+  const handle = await waitForShadow(page, selector);
+  try {
+    const resolved = await handle.session.send('DOM.resolveNode', { nodeId: handle.nodeId });
+    const objectId = resolved.object.objectId;
+    if (!objectId) throw new Error(`No remote object for ${selector}`);
+    await handle.session.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: 'function() { this.focus(); }',
+      returnByValue: true,
+    });
+  } finally {
+    await handle.session.detach().catch(() => undefined);
+  }
+}
+
 export async function fillShadow(page: Page, selector: string, value: string): Promise<void> {
   const handle = await waitForShadow(page, selector);
   try {

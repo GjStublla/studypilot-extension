@@ -9,6 +9,7 @@ import {
 import {
   clickShadow,
   fillShadow,
+  focusShadow,
   shadowChecked,
   shadowBoundingBox,
   shadowExists,
@@ -81,6 +82,26 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     const page = await openFixturePage(context);
     await clickShadow(page, LAUNCHER);
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
+  });
+
+  test('launcher and primary panel controls respond to keyboard activation', async ({
+    context,
+    extensionId,
+  }) => {
+    await seedFixtureSession(context, extensionId);
+    const page = await openFixturePage(context);
+
+    await focusShadow(page, LAUNCHER);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
+
+    await focusShadow(page, SETTINGS);
+    await page.keyboard.press('Enter');
+    await waitForShadow(page, PAGE_URL);
+
+    await focusShadow(page, 'button[aria-label="Minimize"]');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
   });
 
   test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {
