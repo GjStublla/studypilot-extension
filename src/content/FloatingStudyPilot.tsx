@@ -1,15 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  CirclePause,
-  CirclePlay,
   Crown,
-  Headphones,
   HelpCircle,
   Layers,
   Lightbulb,
-  Mic,
-  MicOff,
-  SlidersHorizontal,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
@@ -36,7 +30,6 @@ import {
 } from '@/shared/types';
 import {
   Orb,
-  RoundButton,
   SparkleLogo,
   type FlashcardItem,
   type OrbState,
@@ -45,6 +38,7 @@ import {
 } from './PanelComponents';
 import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
 import { ComposerPanel } from './ComposerPanel';
+import { VoiceDock } from './VoiceDock';
 import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
@@ -1440,40 +1434,19 @@ export function FloatingStudyPilot({
                 <h2 className="sp-headline">Ask anything about this page</h2>
               </motion.section>
 
-              <motion.div className="sp-voice-dock" variants={sectionReveal}>
-                <RoundButton
-                  active={micOn && !paused}
-                  label={micOn ? 'Mute microphone' : 'Unmute microphone'}
-                  onClick={toggleMic}
-                >
-                  {micOn ? <Mic size={20} strokeWidth={1.75} /> : <MicOff size={20} strokeWidth={1.75} />}
-                </RoundButton>
-                <RoundButton
-                  active={isSpeaking}
-                  label={isSpeaking ? 'Stop reading aloud' : 'Read answer aloud'}
-                  onClick={speakAnswer}
-                >
-                  <Headphones size={20} strokeWidth={1.75} />
-                </RoundButton>
-                <RoundButton
-                  active={paused || liveState === 'paused'}
-                  disabled={!liveBusy}
-                  label={paused || liveState === 'paused' ? 'Resume session' : 'Pause session'}
-                  onClick={togglePause}
-                >
-                  {paused || liveState === 'paused'
-                    ? <CirclePlay size={20} strokeWidth={1.75} />
-                    : <CirclePause size={20} strokeWidth={1.75} />}
-                </RoundButton>
-                <RoundButton
-                  active={settingsOpen}
-                  tinted
-                  label="Session settings"
-                  onClick={() => setSettingsOpen(value => !value)}
-                >
-                  <SlidersHorizontal size={20} strokeWidth={1.75} />
-                </RoundButton>
-              </motion.div>
+              <VoiceDock
+                micOn={micOn}
+                paused={paused}
+                isSpeaking={isSpeaking}
+                liveState={liveState}
+                liveBusy={liveBusy}
+                settingsOpen={settingsOpen}
+                variants={sectionReveal}
+                onToggleMic={toggleMic}
+                onSpeak={speakAnswer}
+                onTogglePause={togglePause}
+                onToggleSettings={() => setSettingsOpen(value => !value)}
+              />
 
               <AnimatePresence initial={false}>
                 {settingsOpen ? (
