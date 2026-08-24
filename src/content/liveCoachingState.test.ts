@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveSessionStatus } from '@/shared/types';
 import { controlsFromLiveStatus, isLiveBusyState } from './liveCoachingState';
+import { isCurrentLiveOperation } from './useLiveCoaching';
 
 const status = (
   state: LiveSessionStatus['state'],
@@ -41,5 +42,27 @@ describe('live coaching state derivation', () => {
       micOn: false,
       paused: false,
     });
+  });
+});
+
+describe('live coaching operation boundary', () => {
+  it('accepts only the mounted latest operation', () => {
+    expect(isCurrentLiveOperation({
+      mounted: true,
+      operationSequence: 4,
+      latestSequence: 4,
+    })).toBe(true);
+  });
+
+  it('rejects stale and unmounted responses', () => {
+    const current = {
+      mounted: true,
+      operationSequence: 4,
+      latestSequence: 4,
+    } as const;
+
+    expect(isCurrentLiveOperation({ ...current, mounted: false })).toBe(false);
+    expect(isCurrentLiveOperation({ ...current, operationSequence: 3 })).toBe(false);
+    expect(isCurrentLiveOperation({ ...current, latestSequence: 5 })).toBe(false);
   });
 });

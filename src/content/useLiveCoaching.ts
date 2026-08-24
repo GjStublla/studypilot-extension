@@ -12,6 +12,54 @@ type RuntimeMessageSender = <T>(message: StudyPilotRuntimeMessage) => Promise<T 
 type Notice = (message: string, duration?: number) => void;
 type VoiceQuestion = (question: string) => void;
 
+interface SpeechRecognitionResultLike {
+  0?: { transcript?: string };
+}
+
+interface SpeechRecognitionResultsLike {
+  length: number;
+  [index: number]: SpeechRecognitionResultLike | undefined;
+}
+
+interface SpeechRecognitionResultEventLike {
+  results: SpeechRecognitionResultsLike;
+}
+
+interface SpeechRecognitionErrorEventLike {
+  error?: string;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+interface SpeechRecognitionWindow extends Window {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+}
+
+export function isCurrentLiveOperation({
+  mounted,
+  operationSequence,
+  latestSequence,
+}: {
+  mounted: boolean;
+  operationSequence: number;
+  latestSequence: number;
+}): boolean {
+  return mounted && operationSequence === latestSequence;
+}
+
 export interface UseLiveCoachingOptions {
   getActiveChatId: () => string | null;
   context: ContextShareSettings;
@@ -44,10 +92,13 @@ export function useLiveCoaching({
   const [liveState, setLiveState] = useState<LiveUiState>('idle');
   const [liveFrozen, setLiveFrozen] = useState(false);
   const [liveFallback, setLiveFallback] = useState<'text-coaching' | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const liveOperationSequenceRef = useRef(0);
+  const mountedRef = useRef(true);
   const liveBusy = isLiveBusyState(liveState);
 
   function applyLiveStatus(status: LiveSessionStatus) {
+    if (!mountedRef.current) return;
     const controls = controlsFromLiveStatus(status);
     setLiveState(status.state);
     setLiveFrozen(controls.liveFrozen);
@@ -58,33 +109,55 @@ export function useLiveCoaching({
     if (status.error && status.state === 'error') flashNotice(status.error, 4200);
   }
 
-  function startSpeechRecognition() {
-    if (micOn) {
-      recognitionRef.current?.stop();
-      setMicOn(false);
+  function stopSpeechRecognition() {
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch {
+        // Recognition may already have ended.
+      }
+    }
+  }
+
+  function startSpeechRecognition(operationSequence: number) {
+    const isCurrentRecognition = () => isCurrentLiveOperation({
+      mounted: mountedRef.current,
+      operationSequence,
+      latestSequence: liveOperationSequenceRef.current,
+    });
+
+    if (!isCurrentRecognition()) return;
+    if (recognitionRef.current) {
+      stopSpeechRecognition();
+      if (mountedRef.current) setMicOn(false);
       return;
     }
 
     const SpeechRecognition =
-      (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+      (window as SpeechRecognitionWindow).SpeechRecognition
+      ?? (window as SpeechRecognitionWindow).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       flashNotice('Voice input is not supported in this browser.', 3000);
       return;
     }
 
-    const recognition: any = new SpeechRecognition();
+    const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
 
     recognition.onstart = () => {
+      if (!isCurrentRecognition()) return;
       setMicOn(true);
       setPaused(false);
       flashNotice('Listening…', 8000);
     };
 
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: SpeechRecognitionResultEventLike) => {
+      if (!isCurrentRecognition()) return;
       const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
       if (transcript) {
         setMicOn(false);
@@ -93,7 +166,8 @@ export function useLiveCoaching({
       }
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: SpeechRecognitionErrorEventLike) => {
+      if (!isCurrentRecognition()) return;
       setMicOn(false);
       if (event.error === 'not-allowed') {
         flashNotice('Microphone access denied. Allow it in Chrome settings.', 4000);
@@ -102,23 +176,30 @@ export function useLiveCoaching({
       }
     };
 
-    recognition.onend = () => setMicOn(false);
+    recognition.onend = () => {
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+      if (isCurrentRecognition()) setMicOn(false);
+    };
     recognitionRef.current = recognition;
     try {
       recognition.start();
     } catch {
+      if (!isCurrentRecognition()) return;
       flashNotice('Could not start voice input. Try again.', 3000);
       setMicOn(false);
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
     }
   }
 
   async function startLiveSession() {
+    const operationSequence = ++liveOperationSequenceRef.current;
     const activeChatId = getActiveChatId();
     if (!activeChatId) {
-      startSpeechRecognition();
+      startSpeechRecognition(operationSequence);
       return;
     }
     try {
+      if (!mountedRef.current) return;
       setMicOn(true);
       setPaused(false);
       setLiveFallback(null);
@@ -129,14 +210,24 @@ export function useLiveCoaching({
           privacy: sessionPrivacyFromContext(context),
         },
       });
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       if (response) applyLiveStatus(response);
       else {
         setMicOn(false);
         setLiveFallback('text-coaching');
         flashNotice('Live coach unavailable — use text coaching', 4200);
-        startSpeechRecognition();
+        startSpeechRecognition(operationSequence);
       }
     } catch (error) {
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       setMicOn(false);
       setLiveFallback('text-coaching');
       const message = error instanceof Error ? error.message : 'Live coach unavailable';
@@ -146,15 +237,22 @@ export function useLiveCoaching({
           : `${message} — use text coaching instead`,
         4200,
       );
-      startSpeechRecognition();
+      startSpeechRecognition(operationSequence);
     }
   }
 
   async function stopLiveSession() {
+    const operationSequence = ++liveOperationSequenceRef.current;
+    stopSpeechRecognition();
     try {
       const response = await sendRuntimeMessage<LiveSessionStatus>({
         type: 'STUDYPILOT_LIVE_STOP',
       });
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       if (response) applyLiveStatus(response);
       else {
         setMicOn(false);
@@ -163,38 +261,66 @@ export function useLiveCoaching({
         setLiveFrozen(false);
       }
     } catch (error) {
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       flashNotice(error instanceof Error ? error.message : 'Could not stop Live', 3200);
     }
   }
 
   async function pauseLiveSession() {
+    const operationSequence = ++liveOperationSequenceRef.current;
     try {
       const response = await sendRuntimeMessage<LiveSessionStatus>({
         type: 'STUDYPILOT_LIVE_PAUSE',
       });
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       if (response) applyLiveStatus(response);
       else setPaused(true);
     } catch {
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       flashNotice('Could not pause Live', 2600);
     }
   }
 
   async function resumeLiveSession() {
+    const operationSequence = ++liveOperationSequenceRef.current;
     try {
       const response = await sendRuntimeMessage<LiveSessionStatus>({
         type: 'STUDYPILOT_LIVE_RESUME',
       });
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       if (response) applyLiveStatus(response);
       else {
         setPaused(false);
         setMicOn(true);
       }
     } catch {
+      if (!isCurrentLiveOperation({
+        mounted: mountedRef.current,
+        operationSequence,
+        latestSequence: liveOperationSequenceRef.current,
+      })) return;
       flashNotice('Could not resume Live', 2600);
     }
   }
 
   function toggleMic() {
+    if (!mountedRef.current) return;
     if (liveBusy && liveState !== 'paused') {
       void stopLiveSession();
       return;
@@ -207,6 +333,7 @@ export function useLiveCoaching({
   }
 
   function togglePause() {
+    if (!mountedRef.current) return;
     if (liveState === 'paused') {
       void resumeLiveSession();
       return;
@@ -217,7 +344,9 @@ export function useLiveCoaching({
   }
 
   useEffect(() => () => {
-    recognitionRef.current?.stop();
+    mountedRef.current = false;
+    liveOperationSequenceRef.current += 1;
+    stopSpeechRecognition();
   }, []);
 
   return {
