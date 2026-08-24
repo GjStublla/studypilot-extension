@@ -111,14 +111,19 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
   }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
-    await clickShadow(page, LAUNCHER);
-    await waitForShadow(page, DIALOG);
+    for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
+      await page.setViewportSize(viewport);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waitForShadow(page, LAUNCHER);
+      await clickShadow(page, LAUNCHER);
+      await waitForShadow(page, DIALOG);
 
-    const controls = (await shadowInteractiveAudit(page)).filter(control => control.visible);
-    expect(controls.length).toBeGreaterThan(0);
-    expect(controls.every(control => control.label.length > 0)).toBe(true);
-    expect(controls.filter(control => !control.disabled).every(control => control.tabIndex >= 0)).toBe(true);
-    expect(controls.every(control => !control.clipped)).toBe(true);
+      const controls = (await shadowInteractiveAudit(page)).filter(control => control.visible);
+      expect(controls.length).toBeGreaterThan(0);
+      expect(controls.every(control => control.label.length > 0)).toBe(true);
+      expect(controls.filter(control => !control.disabled).every(control => control.tabIndex >= 0)).toBe(true);
+      expect(controls.every(control => !control.clipped)).toBe(true);
+    }
   });
 
   test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {
