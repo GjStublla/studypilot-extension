@@ -2,6 +2,7 @@ import { motion, type Variants } from 'framer-motion';
 import { CirclePause, CirclePlay, Headphones, Mic, MicOff, SlidersHorizontal } from 'lucide-react';
 import type { LiveUiState } from '@/shared/types';
 import { RoundButton } from './PanelComponents';
+import { canToggleLivePause } from './liveCoachingState';
 
 export interface VoiceDockProps {
   micOn: boolean;
@@ -51,7 +52,7 @@ export function VoiceDock({
       </RoundButton>
       <RoundButton
         active={isPaused}
-        disabled={!liveBusy}
+        disabled={!liveBusy || !canToggleLivePause(liveState)}
         label={isPaused ? 'Resume session' : 'Pause session'}
         onClick={onTogglePause}
       >

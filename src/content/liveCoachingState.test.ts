@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { LiveSessionStatus } from '@/shared/types';
 import {
   acceptsLiveStatusOperation,
+  canToggleLivePause,
   controlsFromLiveStatus,
   isLiveBusyState,
   liveMicIntent,
@@ -42,6 +43,14 @@ describe('live coaching state derivation', () => {
     expect(acceptsLiveStatusOperation(2, 3)).toBe(false);
     expect(acceptsLiveStatusOperation(3, 3)).toBe(true);
     expect(acceptsLiveStatusOperation(undefined, 3)).toBe(true);
+  });
+
+  it('allows pause only for a live or paused session', () => {
+    expect(canToggleLivePause('starting')).toBe(false);
+    expect(canToggleLivePause('connecting')).toBe(false);
+    expect(canToggleLivePause('live')).toBe(true);
+    expect(canToggleLivePause('paused')).toBe(true);
+    expect(canToggleLivePause('stopping')).toBe(false);
   });
 
   it('preserves microphone, pause, freeze, and fallback semantics', () => {

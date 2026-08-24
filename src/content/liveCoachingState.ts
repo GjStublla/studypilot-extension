@@ -36,6 +36,10 @@ export function acceptsLiveStatusOperation(
     || operationId >= latestOperationId;
 }
 
+export function canToggleLivePause(state: LiveUiState): boolean {
+  return state === 'live' || state === 'paused';
+}
+
 export function controlsFromLiveStatus(status: LiveSessionStatus): LiveControls {
   const active = status.state === 'live'
     || status.state === 'connecting'

@@ -8,6 +8,7 @@ import {
 import type { StudyPilotRuntimeMessage } from '@/shared/extensionMessages';
 import {
   acceptsLiveStatusOperation,
+  canToggleLivePause,
   controlsFromLiveStatus,
   isLiveBusyState,
   liveMicIntent,
@@ -364,13 +365,12 @@ export function useLiveCoaching({
 
   function togglePause() {
     if (!mountedRef.current) return;
+    if (!canToggleLivePause(liveState)) return;
     if (liveState === 'paused') {
       void resumeLiveSession();
       return;
     }
-    if (liveBusy) {
-      void pauseLiveSession();
-    }
+    void pauseLiveSession();
   }
 
   useEffect(() => () => {
