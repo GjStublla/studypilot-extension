@@ -50,14 +50,14 @@ import {
   Orb,
   QuizViewer,
   RoundButton,
-  SettingsSheet,
   SparkleLogo,
   type FlashcardItem,
   type OrbState,
   type QuizItem,
   type StructuredCard,
 } from './PanelComponents';
-export { SettingsSheet } from './PanelComponents';
+import { SettingsSheet } from './ContextSettings';
+export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
 import { QuickActions } from './QuickActions';
 import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWorkspace';
