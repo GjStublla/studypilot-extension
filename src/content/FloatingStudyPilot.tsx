@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Camera,
   CirclePause,
   CirclePlay,
   Crown,
@@ -10,9 +9,7 @@ import {
   Lightbulb,
   Mic,
   MicOff,
-  Send,
   SlidersHorizontal,
-  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
@@ -47,6 +44,7 @@ import {
   type StructuredCard,
 } from './PanelComponents';
 import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
+import { ComposerPanel } from './ComposerPanel';
 import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
@@ -1497,84 +1495,18 @@ export function FloatingStudyPilot({
                 ) : null}
               </AnimatePresence>
 
-              {/* Paste-zone: wraps the strip + composer so Ctrl+V anywhere in this area attaches images */}
-              <div className="sp-paste-zone" onPaste={handleComposerPaste}>
-              <AnimatePresence>
-                {pendingScreenshots.length > 0 ? (
-                  <motion.div
-                    key="screenshot-preview"
-                    className="sp-screenshot-strip"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                  >
-                    {pendingScreenshots.map((url, i) => (
-                      <div key={i} className="sp-screenshot-thumb">
-                        <img src={url} alt={`Screenshot ${i + 1}`} />
-                        <button
-                          type="button"
-                          className="sp-screenshot-remove"
-                          aria-label="Remove screenshot"
-                          onClick={() => removePendingScreenshot(i)}
-                        >
-                          <X size={11} />
-                        </button>
-                      </div>
-                    ))}
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-
-              <motion.div className="sp-composer" variants={sectionReveal}>
-                <button
-                  type="button"
-                  className="sp-camera-btn"
-                  aria-label="Attach screenshot"
-                  title="Attach image (or paste with Ctrl+V)"
-                  onClick={openFilePicker}
-                  data-active={pendingScreenshots.length > 0}
-                >
-                  <Camera size={17} strokeWidth={2} />
-                  {pendingScreenshots.length > 0 ? (
-                    <span className="sp-camera-badge">{pendingScreenshots.length}</span>
-                  ) : null}
-                </button>
-                {/* Hidden file input — accepts all common image formats */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  multiple
-                  style={{ display: 'none' }}
-                  aria-hidden="true"
-                  tabIndex={-1}
-                  onChange={handleFileInputChange}
-                />
-                <input
-                  type="text"
-                  value={question}
-                  placeholder="Ask a question or paste an image…"
-                  aria-label="Ask a question"
-                  onChange={event => setQuestion(event.target.value)}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  className="sp-send"
-                  aria-label="Send question"
-                  onClick={handleSubmit}
-                  disabled={!question.trim() && pendingScreenshots.length === 0}
-                >
-                  <Send size={17} strokeWidth={2} fill="currentColor" />
-                </button>
-              </motion.div>
-              </div>{/* end paste-zone */}
+              <ComposerPanel
+                pendingScreenshots={pendingScreenshots}
+                fileInputRef={fileInputRef}
+                question={question}
+                variants={sectionReveal}
+                onPaste={handleComposerPaste}
+                onRemoveScreenshot={removePendingScreenshot}
+                onOpenFilePicker={openFilePicker}
+                onFileInputChange={handleFileInputChange}
+                onQuestionChange={setQuestion}
+                onSubmit={handleSubmit}
+              />
 
               <motion.div className="sp-chips" variants={sectionReveal}>
                 <QuickActions
