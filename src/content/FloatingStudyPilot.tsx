@@ -35,6 +35,7 @@ import { ExtensionPanel } from './ExtensionPanel';
 import { PanelBody } from './PanelBody';
 import { isCurrentPanelOperation } from './panelLifecycle';
 import { createStudySession, fallbackTranscript } from './studySession';
+import { createSpeechUtterance } from './speech';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -48,7 +49,6 @@ interface SaveSessionOptions {
   successNotice?: string;
   finalize?: boolean;
 }
-
 function getPageContext(): PageContext {
   const selectedText = window.getSelection()?.toString().trim();
 
@@ -1015,7 +1015,7 @@ export function FloatingStudyPilot({
       if (autoSpeak) {
         if ('speechSynthesis' in window) {
           window.speechSynthesis.cancel();
-          const utterance = makeSpeechUtterance(responseText);
+          const utterance = createSpeechUtterance(responseText);
           utterance.onstart = () => setIsSpeaking(true);
           utterance.onend = () => setIsSpeaking(false);
           utterance.onerror = () => setIsSpeaking(false);
@@ -1361,7 +1361,7 @@ export function FloatingStudyPilot({
       return;
     }
 
-    const utterance = makeSpeechUtterance(card.body);
+    const utterance = createSpeechUtterance(card.body);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.cancel();
@@ -1583,29 +1583,3 @@ export function FloatingStudyPilot({
   );
 }
 
-/**
- * Pick the best available speech synthesis voice.
- * Prefers Google's neural voices, then falls back to any English voice.
- */
-function getBestVoice(): SpeechSynthesisVoice | null {
-  const voices = window.speechSynthesis.getVoices();
-  if (!voices.length) return null;
-
-  const googleNeural = voices.find(v =>
-    v.name.includes('Google') && v.lang.startsWith('en')
-  );
-  if (googleNeural) return googleNeural;
-
-  const english = voices.find(v => v.lang.startsWith('en-US'));
-  return english ?? voices[0] ?? null;
-}
-
-function makeSpeechUtterance(text: string): SpeechSynthesisUtterance {
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.05;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
-  const voice = getBestVoice();
-  if (voice) utterance.voice = voice;
-  return utterance;
-}
