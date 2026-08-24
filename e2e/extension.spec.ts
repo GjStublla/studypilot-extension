@@ -80,6 +80,17 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
   });
 
+  test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {
+    const page = await openFixturePage(context);
+    for (let index = 0; index < 4; index += 1) {
+      await togglePanelFromExtension(context, extensionId);
+      await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
+      await togglePanelFromExtension(context, extensionId);
+      await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
+    }
+    await expect(page.locator('#studypilot-extension-root')).toHaveCount(1);
+  });
+
   test('privacy defaults keep screenshot and dashboard save off', async ({
     context,
     extensionId,
@@ -112,19 +123,27 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(await shadowChecked(page, SAVE)).toBe(false);
   });
 
-  test('panel stays within a narrow viewport', async ({ context }) => {
+  test('panel stays within 360px and 390px viewports', async ({ context }) => {
     const page = await openFixturePage(context);
-    await page.setViewportSize({ width: 360, height: 800 });
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await waitForShadow(page, LAUNCHER);
-    await clickShadow(page, LAUNCHER);
+    for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
+      await page.setViewportSize(viewport);
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await waitForShadow(page, LAUNCHER);
+      await clickShadow(page, LAUNCHER);
+      await expect
+        .poll(async () => {
+          const box = await shadowBoundingBox(page, DIALOG);
+          return box.y >= 0 && box.y + box.height <= viewport.height;
+        }, { timeout: 3_000 })
+        .toBe(true);
 
-    const panel = await shadowBoundingBox(page, DIALOG);
-    expect(panel.width).toBeLessThanOrEqual(336);
-    expect(panel.x).toBeGreaterThanOrEqual(0);
-    expect(panel.y).toBeGreaterThanOrEqual(0);
-    expect(panel.x + panel.width).toBeLessThanOrEqual(360);
-    expect(panel.y + panel.height).toBeLessThanOrEqual(800);
+      const panel = await shadowBoundingBox(page, DIALOG);
+      expect(panel.width).toBeLessThanOrEqual(viewport.width - 24);
+      expect(panel.x).toBeGreaterThanOrEqual(0);
+      expect(panel.y).toBeGreaterThanOrEqual(0);
+      expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width);
+      expect(panel.y + panel.height).toBeLessThanOrEqual(viewport.height);
+    }
   });
 
   test('microphone denial shows a recoverable message', async ({

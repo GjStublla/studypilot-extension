@@ -13,7 +13,7 @@ type Notice = (message: string, duration?: number) => void;
 type VoiceQuestion = (question: string) => void;
 
 export interface UseLiveCoachingOptions {
-  activeChatId: string | null;
+  getActiveChatId: () => string | null;
   context: ContextShareSettings;
   flashNotice: Notice;
   onVoiceQuestion: VoiceQuestion;
@@ -33,7 +33,7 @@ export interface LiveCoachingController {
 }
 
 export function useLiveCoaching({
-  activeChatId,
+  getActiveChatId,
   context,
   flashNotice,
   onVoiceQuestion,
@@ -113,6 +113,7 @@ export function useLiveCoaching({
   }
 
   async function startLiveSession() {
+    const activeChatId = getActiveChatId();
     if (!activeChatId) {
       startSpeechRecognition();
       return;
@@ -131,7 +132,9 @@ export function useLiveCoaching({
       if (response) applyLiveStatus(response);
       else {
         setMicOn(false);
-        flashNotice('Open the extension build for live coach');
+        setLiveFallback('text-coaching');
+        flashNotice('Live coach unavailable — use text coaching', 4200);
+        startSpeechRecognition();
       }
     } catch (error) {
       setMicOn(false);
