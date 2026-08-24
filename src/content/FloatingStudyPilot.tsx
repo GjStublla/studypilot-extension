@@ -38,6 +38,7 @@ import {
 import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
 import { ComposerPanel } from './ComposerPanel';
 import { VoiceDock } from './VoiceDock';
+import { PomodoroPicker } from './PomodoroPicker';
 import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
@@ -1610,86 +1611,12 @@ export function FloatingStudyPilot({
                 </motion.section>
               ) : null}
 
-              <AnimatePresence>
-                {pomodoroPickerOpen && pomodoroRemaining === null ? (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.2 }}
-                    style={{
-                      display: 'flex',
-                      gap: '6px',
-                      padding: '6px 14px 10px',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexWrap: 'wrap',
-                    }}
-                  >
-                    <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 500, width: '100%', textAlign: 'center', marginBottom: '2px' }}>
-                      🎯 Pick your focus time
-                    </span>
-                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', width: '100%', marginBottom: '8px' }}>
-                      {[5, 15, 25, 45, 60].map(mins => (
-                        <button
-                          key={mins}
-                          type="button"
-                          onClick={() => startPomodoro(mins)}
-                          style={{
-                            padding: '5px 12px',
-                            borderRadius: '8px',
-                            border: '1px solid rgba(99,102,241,0.25)',
-                            background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))',
-                            color: '#818cf8',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease',
-                          }}
-                          onMouseEnter={e => {
-                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2))';
-                            e.currentTarget.style.borderColor = 'rgba(99,102,241,0.5)';
-                            e.currentTarget.style.transform = 'scale(1.05)';
-                          }}
-                          onMouseLeave={e => {
-                            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(139,92,246,0.08))';
-                            e.currentTarget.style.borderColor = 'rgba(99,102,241,0.25)';
-                            e.currentTarget.style.transform = 'scale(1)';
-                          }}
-                        >
-                          {mins}m
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Weekly Progress Mini Chart */}
-                    <div style={{ width: '100%', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <span style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>Weekly Progress</span>
-                      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '6px', height: '40px' }}>
-                        {Array.from({ length: 7 }).map((_, i) => {
-                          const d = new Date();
-                          d.setDate(d.getDate() - (6 - i));
-                          const dateKey = d.toISOString().split('T')[0];
-                          const mins = pomodoroStats[dateKey] || 0;
-                          const maxMins = Math.max(...Object.values(pomodoroStats), 60);
-                          const hPct = Math.max(4, (mins / maxMins) * 100);
-                          const isToday = i === 6;
-                          return (
-                            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                              <div style={{ width: '14px', height: '40px', display: 'flex', alignItems: 'flex-end', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
-                                <div style={{ width: '100%', height: `${hPct}%`, background: isToday ? 'linear-gradient(to top, #8b5cf6, #3b82f6)' : '#475569', borderRadius: '3px', transition: 'height 0.3s ease' }} title={`${mins} min`} />
-                              </div>
-                              <span style={{ fontSize: '9px', color: isToday ? '#8b5cf6' : '#64748b', fontWeight: isToday ? 700 : 500 }}>
-                                {['S','M','T','W','T','F','S'][d.getDay()]}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
+              <PomodoroPicker
+                open={pomodoroPickerOpen}
+                remainingSeconds={pomodoroRemaining}
+                stats={pomodoroStats}
+                onStart={startPomodoro}
+              />
 
               <AnswerCardPanel
                 card={card}
