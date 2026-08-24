@@ -1,6 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowLeft,
   Camera,
   Check,
   ChevronDown,
@@ -63,6 +62,7 @@ import { QuickActions } from './QuickActions';
 import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWorkspace';
 import { ExtensionPanel } from './ExtensionPanel';
 import { ChatSwitcher } from './ChatSwitcher';
+import { StudyModePanel } from './StudyModePanel';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -1433,60 +1433,15 @@ export function FloatingStudyPilot({
               {authState?.connected === false ? (
                 <WebAppConnectView onOpenDashboard={() => void openDashboard()} />
               ) : studyMode !== null ? (
-                /* ── Dedicated study mode panel ── */
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={studyMode}
-                    className="sp-study-panel"
-                    initial={{ opacity: 0, y: 18 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-                  >
-                    <div className="sp-study-header">
-                      <button
-                        type="button"
-                        className="sp-study-back"
-                        aria-label="Back to chat"
-                        onClick={closeStudyMode}
-                      >
-                        <ArrowLeft size={17} strokeWidth={2} />
-                        <span>Back</span>
-                      </button>
-                      <span className="sp-study-title">
-                        {studyMode === 'flashcards'
-                          ? <><Layers size={15} strokeWidth={2} /> Flashcards</>
-                          : <><HelpCircle size={15} strokeWidth={2} /> Quiz</>}
-                      </span>
-                      <button
-                        type="button"
-                        className="sp-study-reload"
-                        aria-label="Regenerate"
-                        title="Generate new set"
-                        onClick={() => void openStudyMode(studyMode)}
-                        disabled={studyLoading}
-                      >
-                        ↺
-                      </button>
-                    </div>
-
-                    {studyLoading ? (
-                      <div className="sp-study-loading">
-                        <span className="sp-study-spinner" aria-hidden="true" />
-                        <span>Generating {studyMode === 'flashcards' ? 'flashcards' : 'quiz'}…</span>
-                      </div>
-                    ) : studyError ? (
-                      <div className="sp-study-error">
-                        <p>{studyError}</p>
-                        <button type="button" onClick={() => void openStudyMode(studyMode)}>Try again</button>
-                      </div>
-                    ) : structuredCard?.type === 'flashcards' ? (
-                      <FlashcardViewer items={structuredCard.items} />
-                    ) : structuredCard?.type === 'quiz' ? (
-                      <QuizViewer items={structuredCard.items} onPerfectScore={fireConfetti} />
-                    ) : null}
-                  </motion.div>
-                </AnimatePresence>
+                <StudyModePanel
+                  mode={studyMode}
+                  loading={studyLoading}
+                  error={studyError}
+                  card={structuredCard}
+                  onClose={closeStudyMode}
+                  onRegenerate={(mode) => { void openStudyMode(mode); }}
+                  onPerfectScore={fireConfetti}
+                />
               ) : (
               <><motion.section
                   className="sp-stage"
