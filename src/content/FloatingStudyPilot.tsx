@@ -350,7 +350,44 @@ export function FloatingStudyPilot({
   }
 
   const noticeTimer = useRef<number | undefined>(undefined);
+  const copiedTimer = useRef<number | undefined>(undefined);
+  const confettiHideTimer = useRef<number | undefined>(undefined);
+  const scheduledTimers = useRef<Set<number>>(new Set());
+  const audioContexts = useRef<Set<AudioContext>>(new Set());
+  const confettiFrame = useRef<number | undefined>(undefined);
+  const confettiAlive = useRef(false);
   const sessionStartedAt = useRef(Date.now());
+
+  function scheduleTimeout(callback: () => void, delay: number): number {
+    const timer = window.setTimeout(() => {
+      scheduledTimers.current.delete(timer);
+      callback();
+    }, delay);
+    scheduledTimers.current.add(timer);
+    return timer;
+  }
+
+  function cancelScheduledTimeout(timer: number | undefined) {
+    if (timer === undefined) return;
+    window.clearTimeout(timer);
+    scheduledTimers.current.delete(timer);
+  }
+
+  function scheduleAudioContextClose(ctx: AudioContext, delay: number) {
+    audioContexts.current.add(ctx);
+    scheduleTimeout(() => {
+      audioContexts.current.delete(ctx);
+      void ctx.close().catch(() => {});
+    }, delay);
+  }
+
+  function stopConfettiAnimation() {
+    confettiAlive.current = false;
+    if (confettiFrame.current !== undefined) {
+      window.cancelAnimationFrame(confettiFrame.current);
+      confettiFrame.current = undefined;
+    }
+  }
 
   useEffect(() => {
     // Preload available voices so getBestVoice() has them ready.
@@ -364,6 +401,55 @@ export function FloatingStudyPilot({
     }
     return undefined;
   }, []);
+
+  useEffect(() => {
+    if (!showConfetti || !confettiRef.current) {
+      stopConfettiAnimation();
+      return undefined;
+    }
+
+    const canvas = confettiRef.current;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.style.cssText = `position:fixed;top:0;left:0;width:${width}px;height:${height}px;pointer-events:none;z-index:99999999`;
+    const context2d = canvas.getContext('2d');
+    if (!context2d) return undefined;
+
+    const particles = Array.from({ length: 120 }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height * 0.4 - height * 0.1,
+      vx: (Math.random() - 0.5) * 6,
+      vy: Math.random() * 3 + 2,
+      color: ['#f97316', '#ef4444', '#8b5cf6', '#10b981', '#3b82f6', '#fbbf24'][Math.floor(Math.random() * 6)],
+      size: Math.random() * 8 + 4,
+      rot: Math.random() * 360,
+      rotV: (Math.random() - 0.5) * 8,
+    }));
+
+    confettiAlive.current = true;
+    const draw = () => {
+      if (!confettiAlive.current) return;
+      context2d.clearRect(0, 0, width, height);
+      for (const particle of particles) {
+        context2d.save();
+        context2d.translate(particle.x, particle.y);
+        context2d.rotate((particle.rot * Math.PI) / 180);
+        context2d.fillStyle = particle.color;
+        context2d.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size * 0.5);
+        context2d.restore();
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        particle.rot += particle.rotV;
+        particle.vy += 0.12;
+      }
+      confettiFrame.current = window.requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => stopConfettiAnimation();
+  }, [showConfetti]);
 
   useEffect(() => {
     const refreshSelection = () => setPage(getPageContext());
@@ -455,6 +541,7 @@ export function FloatingStudyPilot({
 
   useEffect(() => {
     let tooltipLock = false;
+    let selectionTimer: number | undefined;
 
     function handleMouseUp(e: MouseEvent) {
       // Ignore mouseup if selection happened inside the extension shadow DOM
@@ -464,7 +551,9 @@ export function FloatingStudyPilot({
       }
 
       tooltipLock = true;
-      setTimeout(() => {
+      cancelScheduledTimeout(selectionTimer);
+      selectionTimer = scheduleTimeout(() => {
+        selectionTimer = undefined;
         tooltipLock = false;
         const sel = window.getSelection();
         if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
@@ -511,6 +600,7 @@ export function FloatingStudyPilot({
     document.addEventListener('mousedown', handleMouseDown);
 
     return () => {
+      cancelScheduledTimeout(selectionTimer);
       document.removeEventListener('mouseup', handleMouseUp);
       document.removeEventListener('mousedown', handleMouseDown);
     };
@@ -533,7 +623,14 @@ export function FloatingStudyPilot({
 
   useEffect(() => {
     return () => {
-      if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+      for (const timer of scheduledTimers.current) window.clearTimeout(timer);
+      scheduledTimers.current.clear();
+      noticeTimer.current = undefined;
+      copiedTimer.current = undefined;
+      confettiHideTimer.current = undefined;
+      stopConfettiAnimation();
+      for (const ctx of audioContexts.current) void ctx.close().catch(() => {});
+      audioContexts.current.clear();
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
@@ -644,7 +741,7 @@ export function FloatingStudyPilot({
         osc.start(t);
         osc.stop(t + 0.25);
       });
-      setTimeout(() => void ctx.close(), 800);
+      scheduleAudioContextClose(ctx, 800);
     } catch { /* */ }
   }
   function playChime() {
@@ -665,7 +762,7 @@ export function FloatingStudyPilot({
         osc.start(start);
         osc.stop(start + 0.6);
       });
-      setTimeout(() => void ctx.close(), 2000);
+      scheduleAudioContextClose(ctx, 2000);
     } catch { /* no audio context available */ }
   }
 
@@ -683,7 +780,7 @@ export function FloatingStudyPilot({
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
-      setTimeout(() => void ctx.close(), 500);
+      scheduleAudioContextClose(ctx, 500);
     } catch { /* no audio context available */ }
   }
 
@@ -704,7 +801,11 @@ export function FloatingStudyPilot({
   function fireConfetti() {
     setShowConfetti(true);
     playChime();
-    setTimeout(() => setShowConfetti(false), 3500);
+    cancelScheduledTimeout(confettiHideTimer.current);
+    confettiHideTimer.current = scheduleTimeout(() => {
+      confettiHideTimer.current = undefined;
+      setShowConfetti(false);
+    }, 3500);
   }
 
   const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
@@ -742,9 +843,12 @@ export function FloatingStudyPilot({
   }, [page.host]);
 
   function flashNotice(text: string, duration = 2200) {
-    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    cancelScheduledTimeout(noticeTimer.current);
     setNotice(text);
-    noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
+    noticeTimer.current = scheduleTimeout(() => {
+      noticeTimer.current = undefined;
+      setNotice(null);
+    }, duration);
   }
 
   function elapsedSeconds() {
@@ -1261,7 +1365,11 @@ export function FloatingStudyPilot({
       scratch.remove();
     }
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    cancelScheduledTimeout(copiedTimer.current);
+    copiedTimer.current = scheduleTimeout(() => {
+      copiedTimer.current = undefined;
+      setCopied(false);
+    }, 1600);
   }
 
   // Hidden file input for the "pick from file explorer" flow
@@ -1269,7 +1377,9 @@ export function FloatingStudyPilot({
 
   useEffect(() => () => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+    cancelScheduledTimeout(noticeTimer.current);
+    cancelScheduledTimeout(copiedTimer.current);
+    cancelScheduledTimeout(confettiHideTimer.current);
   }, []);
 
   return (
@@ -1281,46 +1391,7 @@ export function FloatingStudyPilot({
         {/* Confetti canvas overlay */}
         {showConfetti && (
           <canvas
-            ref={(el) => {
-              confettiRef.current = el;
-              if (!el) return;
-              const W = window.innerWidth;
-              const H = window.innerHeight;
-              el.width = W;
-              el.height = H;
-              el.style.cssText = `position:fixed;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;z-index:99999999`;
-              const ctx2d = el.getContext('2d')!;
-              const particles = Array.from({ length: 120 }, () => ({
-                x: Math.random() * W,
-                y: Math.random() * H * 0.4 - H * 0.1,
-                vx: (Math.random() - 0.5) * 6,
-                vy: Math.random() * 3 + 2,
-                color: ['#f97316','#ef4444','#8b5cf6','#10b981','#3b82f6','#fbbf24'][Math.floor(Math.random()*6)],
-                size: Math.random() * 8 + 4,
-                rot: Math.random() * 360,
-                rotV: (Math.random() - 0.5) * 8,
-              }));
-              let alive = true;
-              const draw = () => {
-                if (!alive) return;
-                ctx2d.clearRect(0, 0, W, H);
-                for (const p of particles) {
-                  ctx2d.save();
-                  ctx2d.translate(p.x, p.y);
-                  ctx2d.rotate((p.rot * Math.PI) / 180);
-                  ctx2d.fillStyle = p.color;
-                  ctx2d.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.5);
-                  ctx2d.restore();
-                  p.x += p.vx;
-                  p.y += p.vy;
-                  p.rot += p.rotV;
-                  p.vy += 0.12;
-                }
-                requestAnimationFrame(draw);
-              };
-              draw();
-              setTimeout(() => { alive = false; }, 3500);
-            }}
+            ref={confettiRef}
           />
         )}
         <AnimatePresence>
