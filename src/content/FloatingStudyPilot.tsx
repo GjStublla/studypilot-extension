@@ -1493,7 +1493,6 @@ export function FloatingStudyPilot({
               orbState={orbState}
               statusText={statusText}
               micOn={micOn}
-              paused={paused}
               isSpeaking={isSpeaking}
               liveState={liveState}
               settingsOpen={settingsOpen}

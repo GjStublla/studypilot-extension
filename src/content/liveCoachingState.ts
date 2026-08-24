@@ -9,6 +9,14 @@ export interface LiveControls {
 
 export type LiveMicIntent = 'start' | 'stop-live' | 'stop-speech' | 'resume' | 'ignore';
 
+export type LivePauseIntent = 'pause' | 'resume';
+
+export interface LivePauseControl {
+  paused: boolean;
+  enabled: boolean;
+  label: 'Pause session' | 'Resume session';
+}
+
 export function isLiveBusyState(state: LiveUiState): boolean {
   return state === 'starting'
     || state === 'connecting'
@@ -38,6 +46,28 @@ export function acceptsLiveStatusOperation(
 
 export function canToggleLivePause(state: LiveUiState): boolean {
   return state === 'live' || state === 'paused';
+}
+
+export function livePauseControl(
+  state: LiveUiState,
+  liveBusy: boolean,
+): LivePauseControl {
+  const paused = state === 'paused';
+
+  return {
+    paused,
+    enabled: liveBusy && canToggleLivePause(state),
+    label: paused ? 'Resume session' : 'Pause session',
+  };
+}
+
+export function fallbackLiveStateForControl(
+  state: LiveUiState,
+  intent: LivePauseIntent,
+): LiveUiState {
+  if (intent === 'pause' && state === 'live') return 'paused';
+  if (intent === 'resume' && state === 'paused') return 'live';
+  return state;
 }
 
 export function controlsFromLiveStatus(status: LiveSessionStatus): LiveControls {

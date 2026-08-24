@@ -2,11 +2,10 @@ import { motion, type Variants } from 'framer-motion';
 import { CirclePause, CirclePlay, Headphones, Mic, MicOff, SlidersHorizontal } from 'lucide-react';
 import type { LiveUiState } from '@/shared/types';
 import { RoundButton } from './PanelComponents';
-import { canToggleLivePause } from './liveCoachingState';
+import { livePauseControl } from './liveCoachingState';
 
 export interface VoiceDockProps {
   micOn: boolean;
-  paused: boolean;
   isSpeaking: boolean;
   liveState: LiveUiState;
   liveBusy: boolean;
@@ -20,7 +19,6 @@ export interface VoiceDockProps {
 
 export function VoiceDock({
   micOn,
-  paused,
   isSpeaking,
   liveState,
   liveBusy,
@@ -31,12 +29,12 @@ export function VoiceDock({
   onTogglePause,
   onToggleSettings,
 }: VoiceDockProps) {
-  const isPaused = paused || liveState === 'paused';
+  const pauseControl = livePauseControl(liveState, liveBusy);
 
   return (
     <motion.div className="sp-voice-dock" variants={variants}>
       <RoundButton
-        active={micOn && !paused}
+        active={micOn && !pauseControl.paused}
         disabled={liveState === 'stopping'}
         label={micOn ? 'Mute microphone' : 'Unmute microphone'}
         onClick={onToggleMic}
@@ -51,12 +49,12 @@ export function VoiceDock({
         <Headphones size={20} strokeWidth={1.75} />
       </RoundButton>
       <RoundButton
-        active={isPaused}
-        disabled={!liveBusy || !canToggleLivePause(liveState)}
-        label={isPaused ? 'Resume session' : 'Pause session'}
+        active={pauseControl.paused}
+        disabled={!pauseControl.enabled}
+        label={pauseControl.label}
         onClick={onTogglePause}
       >
-        {isPaused
+        {pauseControl.paused
           ? <CirclePlay size={20} strokeWidth={1.75} />
           : <CirclePause size={20} strokeWidth={1.75} />}
       </RoundButton>

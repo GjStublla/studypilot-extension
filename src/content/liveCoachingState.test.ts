@@ -4,8 +4,10 @@ import {
   acceptsLiveStatusOperation,
   canToggleLivePause,
   controlsFromLiveStatus,
+  fallbackLiveStateForControl,
   isLiveBusyState,
   liveMicIntent,
+  livePauseControl,
 } from './liveCoachingState';
 import { isCurrentLiveOperation } from './useLiveCoaching';
 
@@ -51,6 +53,28 @@ describe('live coaching state derivation', () => {
     expect(canToggleLivePause('live')).toBe(true);
     expect(canToggleLivePause('paused')).toBe(true);
     expect(canToggleLivePause('stopping')).toBe(false);
+  });
+
+  it('derives one valid pause/resume presentation from the live state', () => {
+    expect(livePauseControl('live', true)).toEqual({
+      paused: false,
+      enabled: true,
+      label: 'Pause session',
+    });
+    expect(livePauseControl('paused', true)).toEqual({
+      paused: true,
+      enabled: true,
+      label: 'Resume session',
+    });
+    expect(livePauseControl('live', false).enabled).toBe(false);
+    expect(livePauseControl('stopping', true).enabled).toBe(false);
+  });
+
+  it('keeps local pause/resume fallbacks aligned with the state machine', () => {
+    expect(fallbackLiveStateForControl('live', 'pause')).toBe('paused');
+    expect(fallbackLiveStateForControl('paused', 'resume')).toBe('live');
+    expect(fallbackLiveStateForControl('starting', 'pause')).toBe('starting');
+    expect(fallbackLiveStateForControl('live', 'resume')).toBe('live');
   });
 
   it('preserves microphone, pause, freeze, and fallback semantics', () => {

@@ -51,7 +51,6 @@ export interface PanelBodyProps {
   orbState: OrbState;
   statusText: string;
   micOn: boolean;
-  paused: boolean;
   isSpeaking: boolean;
   liveState: LiveUiState;
   settingsOpen: boolean;
@@ -125,7 +124,6 @@ export function PanelBody({
   orbState,
   statusText,
   micOn,
-  paused,
   isSpeaking,
   liveState,
   settingsOpen,
@@ -218,7 +216,6 @@ export function PanelBody({
 
           <VoiceDock
             micOn={micOn}
-            paused={paused}
             isSpeaking={isSpeaking}
             liveState={liveState}
             liveBusy={liveBusy}

@@ -7,7 +7,6 @@ function renderDock(liveState: LiveUiState, liveBusy: boolean): string {
   return renderToStaticMarkup(
     <VoiceDock
       micOn={false}
-      paused={liveState === 'paused'}
       isSpeaking={false}
       liveState={liveState}
       liveBusy={liveBusy}

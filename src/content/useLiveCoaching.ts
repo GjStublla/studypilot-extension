@@ -10,6 +10,7 @@ import {
   acceptsLiveStatusOperation,
   canToggleLivePause,
   controlsFromLiveStatus,
+  fallbackLiveStateForControl,
   isLiveBusyState,
   liveMicIntent,
 } from './liveCoachingState';
@@ -327,7 +328,12 @@ export function useLiveCoaching({
         latestSequence: liveOperationSequenceRef.current,
       })) return;
       if (response) applyLiveStatus(response);
-      else setPaused(true);
+      else {
+        const nextState = fallbackLiveStateForControl(liveState, 'pause');
+        setLiveState(nextState);
+        setPaused(nextState === 'paused');
+        setMicOn(nextState !== 'paused' && isLiveBusyState(nextState));
+      }
     } catch {
       if (!isCurrentLiveOperation({
         mounted: mountedRef.current,
@@ -351,8 +357,10 @@ export function useLiveCoaching({
       })) return;
       if (response) applyLiveStatus(response);
       else {
-        setPaused(false);
-        setMicOn(true);
+        const nextState = fallbackLiveStateForControl(liveState, 'resume');
+        setLiveState(nextState);
+        setPaused(nextState === 'paused');
+        setMicOn(nextState === 'live');
       }
     } catch {
       if (!isCurrentLiveOperation({
