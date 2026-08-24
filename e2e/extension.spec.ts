@@ -9,6 +9,7 @@ import {
 import {
   clickShadow,
   shadowChecked,
+  shadowBoundingBox,
   shadowExists,
   shadowText,
   waitForShadow,
@@ -109,6 +110,21 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(await shadowChecked(page, PAGE_URL)).toBe(false);
     expect(await shadowChecked(page, SCREENSHOT)).toBe(false);
     expect(await shadowChecked(page, SAVE)).toBe(false);
+  });
+
+  test('panel stays within a narrow viewport', async ({ context }) => {
+    const page = await openFixturePage(context);
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForShadow(page, LAUNCHER);
+    await clickShadow(page, LAUNCHER);
+
+    const panel = await shadowBoundingBox(page, DIALOG);
+    expect(panel.width).toBeLessThanOrEqual(336);
+    expect(panel.x).toBeGreaterThanOrEqual(0);
+    expect(panel.y).toBeGreaterThanOrEqual(0);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(360);
+    expect(panel.y + panel.height).toBeLessThanOrEqual(800);
   });
 
   test('microphone denial shows a recoverable message', async ({
