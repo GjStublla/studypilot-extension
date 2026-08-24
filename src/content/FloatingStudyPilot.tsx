@@ -1,10 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  Crown,
-  HelpCircle,
-  Layers,
-  Lightbulb,
-} from 'lucide-react';
+import { Crown } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
@@ -39,6 +34,7 @@ import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
 import { ComposerPanel } from './ComposerPanel';
 import { VoiceDock } from './VoiceDock';
 import { PomodoroPicker } from './PomodoroPicker';
+import { SelectionTooltip, type SelectionTooltipData } from './SelectionTooltip';
 import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
@@ -143,7 +139,7 @@ export function FloatingStudyPilot({
   const [pomodoroEndTime, setPomodoroEndTime] = useState<number | null>(null);
   const [pomodoroDuration, setPomodoroDuration] = useState<number>(25);
   const [pomodoroRemaining, setPomodoroRemaining] = useState<number | null>(null);
-  const [selectionTooltip, setSelectionTooltip] = useState<{ top: number; left: number; text: string; placeBelow?: boolean } | null>(null);
+  const [selectionTooltip, setSelectionTooltip] = useState<SelectionTooltipData | null>(null);
   const [personality, setPersonality] = useState<string>('Default');
   const [streak, setStreak] = useState(0);
   const [pomodoroStats, setPomodoroStats] = useState<Record<string, number>>({});
@@ -1661,110 +1657,25 @@ export function FloatingStudyPilot({
       </AnimatePresence>
     </div>
 
-      <AnimatePresence>
-        {selectionTooltip && !isOpen ? (
-          <motion.div
-            className="sp-selection-tooltip"
-            onMouseDown={(e) => e.stopPropagation()}
-            onPointerDown={(e) => e.stopPropagation()}
-            initial={{ opacity: 0, y: selectionTooltip.placeBelow ? -8 : 8, scale: 0.93 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: selectionTooltip.placeBelow ? -4 : 4, scale: 0.95 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-            style={{
-              position: 'fixed',
-              top: selectionTooltip.top,
-              left: selectionTooltip.left,
-              zIndex: 2147483647,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '2px',
-              padding: '5px 6px',
-              background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-              borderRadius: '10px',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            {/* Caret arrow pointing down or up */}
-            <span style={{
-              position: 'absolute',
-              ...(selectionTooltip.placeBelow
-                ? { top: -6, borderBottom: '6px solid #16213e', borderTop: 'none' }
-                : { bottom: -6, borderTop: '6px solid #16213e', borderBottom: 'none' }),
-              left: '50%',
-              transform: 'translateX(-50%)',
-              width: 0,
-              height: 0,
-              borderLeft: '6px solid transparent',
-              borderRight: '6px solid transparent',
-              filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.3))',
-            }} />
-            {[
-              {
-                label: 'Explain',
-                icon: <Lightbulb size={13} strokeWidth={2} />,
-                color: '#f59e0b',
-                action: () => {
-                  const selText = selectionTooltip.text;
-                  setIsOpen(true);
-                  setSelectionTooltip(null);
-                  void runStudyAction('explain', `Explain this: "${selText}"`);
-                }
-              },
-              {
-                label: 'Flashcard',
-                icon: <Layers size={13} strokeWidth={2} />,
-                color: '#8b5cf6',
-                action: () => {
-                  const selText = selectionTooltip.text;
-                  setIsOpen(true);
-                  setSelectionTooltip(null);
-                  void openStudyMode('flashcards', selText);
-                }
-              },
-              {
-                label: 'Quiz Me',
-                icon: <HelpCircle size={13} strokeWidth={2} />,
-                color: '#10b981',
-                action: () => {
-                  const selText = selectionTooltip.text;
-                  setIsOpen(true);
-                  setSelectionTooltip(null);
-                  void openStudyMode('quiz', selText);
-                }
-              },
-            ].map(({ label, icon, color, action }) => (
-              <button
-                key={label}
-                type="button"
-                onClick={action}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  padding: '5px 9px',
-                  borderRadius: '7px',
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#e2e8f0',
-                  fontSize: '12px',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'background 0.15s ease',
-                  whiteSpace: 'nowrap',
-                  letterSpacing: '0.01em',
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.1)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
-              >
-                <span style={{ color }}>{icon}</span>
-                {label}
-              </button>
-            ))}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      <SelectionTooltip
+        panelOpen={isOpen}
+        selection={selectionTooltip}
+        onExplain={text => {
+          setIsOpen(true);
+          setSelectionTooltip(null);
+          void runStudyAction('explain', `Explain this: "${text}"`);
+        }}
+        onFlashcard={text => {
+          setIsOpen(true);
+          setSelectionTooltip(null);
+          void openStudyMode('flashcards', text);
+        }}
+        onQuiz={text => {
+          setIsOpen(true);
+          setSelectionTooltip(null);
+          void openStudyMode('quiz', text);
+        }}
+      />
     </>
   );
 }
