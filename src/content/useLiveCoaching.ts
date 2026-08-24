@@ -6,7 +6,12 @@ import {
   type LiveUiState,
 } from '@/shared/types';
 import type { StudyPilotRuntimeMessage } from '@/shared/extensionMessages';
-import { controlsFromLiveStatus, isLiveBusyState, liveMicIntent } from './liveCoachingState';
+import {
+  acceptsLiveStatusOperation,
+  controlsFromLiveStatus,
+  isLiveBusyState,
+  liveMicIntent,
+} from './liveCoachingState';
 
 type RuntimeMessageSender = <T>(message: StudyPilotRuntimeMessage) => Promise<T | null>;
 type Notice = (message: string, duration?: number) => void;
@@ -94,11 +99,18 @@ export function useLiveCoaching({
   const [liveFallback, setLiveFallback] = useState<'text-coaching' | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const liveOperationSequenceRef = useRef(0);
+  const latestRemoteOperationIdRef = useRef<number | undefined>(undefined);
   const mountedRef = useRef(true);
   const liveBusy = isLiveBusyState(liveState);
 
   function applyLiveStatus(status: LiveSessionStatus) {
     if (!mountedRef.current) return;
+    if (!acceptsLiveStatusOperation(status.operationId, latestRemoteOperationIdRef.current)) {
+      return;
+    }
+    if (status.operationId !== undefined) {
+      latestRemoteOperationIdRef.current = status.operationId;
+    }
     const controls = controlsFromLiveStatus(status);
     setLiveState(status.state);
     setLiveFrozen(controls.liveFrozen);

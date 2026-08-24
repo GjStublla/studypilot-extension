@@ -47,6 +47,7 @@ type PendingTurn = LiveTurnRequest & { queuedAt: number };
 
 type RuntimeLive = {
   state: LiveUiState;
+  operationId: number;
   selection: LiveSelection;
   selectionFrozen: boolean;
   error: string | null;
@@ -67,6 +68,7 @@ type RuntimeLive = {
 
 const live: RuntimeLive = {
   state: 'idle',
+  operationId: 0,
   selection: { chatId: null, rubricId: null, sessionId: null },
   selectionFrozen: false,
   error: null,
@@ -83,6 +85,17 @@ const live: RuntimeLive = {
   reconnecting: false,
   reconnectAttempts: 0,
 };
+
+export function isCurrentLiveRuntimeOperation(
+  operationId: number,
+  latestOperationId: number,
+): boolean {
+  return operationId === latestOperationId;
+}
+
+function isCurrentOperation(operationId: number): boolean {
+  return isCurrentLiveRuntimeOperation(operationId, live.operationId);
+}
 
 function normalizeInitialTurns(raw: unknown): GeminiContentTurn[] {
   if (!Array.isArray(raw)) return [];
@@ -124,6 +137,7 @@ function statusMessage(): SwToPanelLiveMessage {
   return {
     type: 'STUDYPILOT_LIVE_STATUS',
     state: live.state,
+    operationId: live.operationId,
     selection: { ...live.selection },
     selectionFrozen: live.selectionFrozen,
     error: live.error,
@@ -372,7 +386,8 @@ export async function startLive(opts: {
     live.state === 'live' ||
     live.state === 'connecting' ||
     live.state === 'starting' ||
-    live.state === 'paused'
+    live.state === 'paused' ||
+    live.state === 'stopping'
   ) {
     throw new Error('Live already active. Stop the current session before starting another.');
   }
@@ -380,6 +395,8 @@ export async function startLive(opts: {
   if (!opts.chatId) {
     throw new Error('Select a shared chat before starting Live.');
   }
+
+  const operationId = ++live.operationId;
 
   await setState({
     state: 'starting',
@@ -390,6 +407,7 @@ export async function startLive(opts: {
     rubric: null,
     ragReady: false,
   });
+  if (!isCurrentOperation(operationId)) return statusMessage();
 
   try {
     // Startup order: resolve chat → screenshot → bootstrap → connect → history → video → mic
@@ -415,8 +433,10 @@ export async function startLive(opts: {
     const screenshot = opts.privacy.captureScreenshot
       ? await captureActiveTabJpeg(opts.windowId)
       : null;
+    if (!isCurrentOperation(operationId)) return statusMessage();
 
     await setState({ state: 'connecting' });
+    if (!isCurrentOperation(operationId)) return statusMessage();
 
     const tokenRes = await fetchLiveToken({
       liveSessionId,
@@ -426,6 +446,7 @@ export async function startLive(opts: {
       mode: 'Study Coach',
       quotaRequestId: liveSessionId,
     });
+    if (!isCurrentOperation(operationId)) return statusMessage();
 
     const auth = resolveLiveAuth(tokenRes);
 
@@ -438,6 +459,7 @@ export async function startLive(opts: {
     live.rubric = tokenRes.rubric ?? null;
     live.ragReady = Boolean(tokenRes.ragReady);
     await chrome.storage.local.set({ [STORAGE.selection]: live.selection });
+    if (!isCurrentOperation(operationId)) return statusMessage();
 
     const expiresAt =
       tokenRes.expireTime ||
@@ -474,10 +496,12 @@ export async function startLive(opts: {
       screenshotJpegBase64: screenshot,
       seedHistoryAndScreenshot: seed,
     });
+    if (!isCurrentOperation(operationId)) return statusMessage();
 
     live.hasSeededSession = true;
     return statusMessage();
   } catch (err) {
+    if (!isCurrentOperation(operationId)) return statusMessage();
     const message = err instanceof Error ? err.message : String(err);
     live.liveSessionId = null;
     live.startedAtMs = null;
@@ -496,14 +520,18 @@ export async function startLive(opts: {
 export async function stopLive(
   reason: 'user_stop' | 'error' | 'go_away' = 'user_stop',
 ): Promise<SwToPanelLiveMessage> {
+  const operationId = ++live.operationId;
   await setState({ state: 'stopping' });
+  if (!isCurrentOperation(operationId)) return statusMessage();
   try {
     await sendToOffscreen({ type: 'OFFSCREEN_DISCONNECT', reason });
   } catch {
     // offscreen may already be gone
   }
+  if (!isCurrentOperation(operationId)) return statusMessage();
 
   await flushPendingTurns();
+  if (!isCurrentOperation(operationId)) return statusMessage();
 
   try {
     if (live.liveSessionId) {
@@ -524,6 +552,8 @@ export async function stopLive(
       err instanceof Error ? `live-finish failed: ${err.message}` : 'live-finish failed';
   }
 
+  if (!isCurrentOperation(operationId)) return statusMessage();
+
   live.hasSeededSession = false;
   live.liveSessionId = null;
   live.startedAtMs = null;
@@ -531,6 +561,7 @@ export async function stopLive(
   live.reconnecting = false;
   live.reconnectAttempts = 0;
   await chrome.storage.local.remove(STORAGE.resumption);
+  if (!isCurrentOperation(operationId)) return statusMessage();
   await setState({
     state: 'idle',
     selectionFrozen: false,
@@ -541,14 +572,20 @@ export async function stopLive(
 }
 
 export async function pauseLive(): Promise<SwToPanelLiveMessage> {
+  const operationId = ++live.operationId;
   await sendToOffscreen({ type: 'OFFSCREEN_PAUSE' });
+  if (!isCurrentOperation(operationId)) return statusMessage();
   await setState({ state: 'paused' });
+  if (!isCurrentOperation(operationId)) return statusMessage();
   return statusMessage();
 }
 
 export async function resumeLive(): Promise<SwToPanelLiveMessage> {
+  const operationId = ++live.operationId;
   await sendToOffscreen({ type: 'OFFSCREEN_RESUME' });
+  if (!isCurrentOperation(operationId)) return statusMessage();
   await setState({ state: 'live' });
+  if (!isCurrentOperation(operationId)) return statusMessage();
   return statusMessage();
 }
 

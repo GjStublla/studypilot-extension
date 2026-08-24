@@ -96,6 +96,7 @@ function toLiveSessionStatus(): LiveSessionStatus {
   }
   return {
     state: status.state,
+    operationId: status.operationId,
     selectionFrozen: status.selectionFrozen,
     error: status.error,
     warning: status.warning,

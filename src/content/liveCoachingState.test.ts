@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveSessionStatus } from '@/shared/types';
-import { controlsFromLiveStatus, isLiveBusyState, liveMicIntent } from './liveCoachingState';
+import {
+  acceptsLiveStatusOperation,
+  controlsFromLiveStatus,
+  isLiveBusyState,
+  liveMicIntent,
+} from './liveCoachingState';
 import { isCurrentLiveOperation } from './useLiveCoaching';
 
 const status = (
@@ -31,6 +36,12 @@ describe('live coaching state derivation', () => {
     expect(liveMicIntent('stopping', false)).toBe('ignore');
     expect(liveMicIntent('error', true)).toBe('stop-speech');
     expect(liveMicIntent('idle', true)).toBe('stop-speech');
+  });
+
+  it('rejects status fan-out from an older runtime operation', () => {
+    expect(acceptsLiveStatusOperation(2, 3)).toBe(false);
+    expect(acceptsLiveStatusOperation(3, 3)).toBe(true);
+    expect(acceptsLiveStatusOperation(undefined, 3)).toBe(true);
   });
 
   it('preserves microphone, pause, freeze, and fallback semantics', () => {

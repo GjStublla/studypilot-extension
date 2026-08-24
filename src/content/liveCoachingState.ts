@@ -27,6 +27,15 @@ export function liveMicIntent(
   return 'start';
 }
 
+export function acceptsLiveStatusOperation(
+  operationId: number | undefined,
+  latestOperationId: number | undefined,
+): boolean {
+  return operationId === undefined
+    || latestOperationId === undefined
+    || operationId >= latestOperationId;
+}
+
 export function controlsFromLiveStatus(status: LiveSessionStatus): LiveControls {
   const active = status.state === 'live'
     || status.state === 'connecting'

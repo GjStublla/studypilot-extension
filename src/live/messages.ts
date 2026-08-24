@@ -71,6 +71,8 @@ export type SwToPanelLiveMessage =
   | {
       type: 'STUDYPILOT_LIVE_STATUS';
       state: LiveUiState;
+      /** Monotonic service-worker control operation; older fan-out is stale. */
+      operationId?: number;
       selection: LiveSelection;
       selectionFrozen: boolean;
       error?: string | null;

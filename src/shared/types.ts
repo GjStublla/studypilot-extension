@@ -241,6 +241,8 @@ export type LiveTokenResult =
 
 export interface LiveSessionStatus {
   state: LiveUiState;
+  /** Monotonic service-worker control operation; older status messages are stale. */
+  operationId?: number;
   selectionFrozen: boolean;
   error?: string | null;
   warning?: string | null;
