@@ -105,6 +105,30 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
   });
 
+  test('secondary menu actions respond to keyboard activation', async ({
+    context,
+    extensionId,
+  }) => {
+    await seedFixtureSession(context, extensionId);
+    const page = await openFixturePage(context);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+
+    await clickShadow(page, LAUNCHER);
+    await waitForShadow(page, DIALOG);
+    await focusShadow(page, 'button[aria-label="More options"]');
+    await page.keyboard.press('Enter');
+    await waitForShadow(page, '[role="menu"]');
+
+    await focusShadow(page, 'button[role="menuitem"]');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => shadowExists(page, '[role="menu"]')).toBe(false);
+    expect(errors).toEqual([]);
+  });
+
   test('visible panel controls are named, focusable, and not clipped', async ({
     context,
     extensionId,
