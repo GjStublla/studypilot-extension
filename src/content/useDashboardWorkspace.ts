@@ -5,8 +5,10 @@ import type {
   DashboardChatMessage,
   DashboardChatSummary,
   DashboardSessionSummary,
+  DashboardSaveResult,
   ExtensionAuthState,
   SharedChatContext,
+  StudySession,
 } from '@/shared/types';
 import {
   presentCanonicalChat,
@@ -54,6 +56,7 @@ export interface DashboardWorkspaceController {
   chatMessages: DashboardChatMessage[];
   inFlightChatIds: Set<string>;
   isCreatingChat: boolean;
+  isSavingSession: boolean;
   isRefreshingChats: boolean;
   sessionChatIdRef: { current: string | null };
   activeChatIdRef: { current: string | null };
@@ -65,6 +68,11 @@ export interface DashboardWorkspaceController {
   selectDashboardChat: (chatId: string | null) => Promise<void>;
   createNewDashboardChat: (title?: string) => Promise<DashboardChatSummary | null>;
   continueDashboardSession: (session: DashboardSessionSummary) => Promise<void>;
+  saveSessionToDashboard: (input: {
+    chatId: string;
+    session: StudySession;
+    finalize?: boolean;
+  }) => Promise<DashboardSaveResult | null>;
   bridgeDashboardSession: () => Promise<void>;
   addInFlightChat: (chatId: string) => void;
   removeInFlightChat: (chatId: string) => void;
@@ -85,12 +93,14 @@ export function useDashboardWorkspace({
   const [chatMessages, setChatMessages] = useState<DashboardChatMessage[]>([]);
   const [inFlightChatIds, setInFlightChatIds] = useState<Set<string>>(() => new Set());
   const [isCreatingChat, setIsCreatingChat] = useState(false);
+  const [isSavingSession, setIsSavingSession] = useState(false);
   const [isRefreshingChats, setIsRefreshingChats] = useState(false);
 
   const sessionChatIdRef = useRef<string | null>(null);
   const activeChatIdRef = useRef<string | null>(null);
   const refreshSequenceRef = useRef(0);
   const creatingChatRef = useRef(false);
+  const savingSessionRef = useRef(false);
   const mountedRef = useRef(true);
 
   useEffect(() => () => {
@@ -268,6 +278,31 @@ export function useDashboardWorkspace({
     }
   }
 
+  async function saveSessionToDashboard({
+    chatId,
+    session,
+    finalize,
+  }: {
+    chatId: string;
+    session: StudySession;
+    finalize?: boolean;
+  }): Promise<DashboardSaveResult | null> {
+    if (!mountedRef.current || savingSessionRef.current) return null;
+
+    savingSessionRef.current = true;
+    setIsSavingSession(true);
+    try {
+      const response = await sendRuntimeMessage<DashboardSaveResult>({
+        type: 'STUDYPILOT_SAVE_SESSION',
+        payload: { chatId, session, finalize },
+      });
+      return mountedRef.current ? response : null;
+    } finally {
+      savingSessionRef.current = false;
+      if (mountedRef.current) setIsSavingSession(false);
+    }
+  }
+
   async function bridgeDashboardSession() {
     const dashboardSession = readDashboardAuthSession();
     if (!dashboardSession) return;
@@ -314,6 +349,7 @@ export function useDashboardWorkspace({
     chatMessages,
     inFlightChatIds,
     isCreatingChat,
+    isSavingSession,
     isRefreshingChats,
     sessionChatIdRef,
     activeChatIdRef,
@@ -325,6 +361,7 @@ export function useDashboardWorkspace({
     selectDashboardChat,
     createNewDashboardChat,
     continueDashboardSession,
+    saveSessionToDashboard,
     bridgeDashboardSession,
     addInFlightChat,
     removeInFlightChat,

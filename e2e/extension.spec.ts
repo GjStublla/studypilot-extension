@@ -132,7 +132,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(await shadowChecked(page, SAVE)).toBe(false);
   });
 
-  test('panel stays within 360px and 390px viewports', async ({ context, extensionId }) => {
+  test('panel stays within 360px and 390px viewports', async ({ context, extensionId }, testInfo) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
@@ -160,6 +160,11 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
       expect(quickActions).toEqual(expect.stringContaining('Explain'));
       expect(quickActions).toEqual(expect.stringContaining('Quiz Me'));
       expect(quickActions).toEqual(expect.stringContaining('Flashcards'));
+
+      await page.screenshot({
+        path: testInfo.outputPath(`panel-${viewport.width}x${viewport.height}.png`),
+        animations: 'disabled',
+      });
     }
   });
 
@@ -195,9 +200,9 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     }
 
     const opened = await newPagePromise;
-    await opened.waitForLoadState('domcontentloaded');
-    expect(opened.url().length).toBeGreaterThan(8);
+    await expect.poll(() => opened.url(), { timeout: 5_000 }).toMatch(/^https?:\/\//);
     expect(opened.url()).not.toMatch(/^chrome-extension:/);
+    await opened.close();
   });
 
   test('connected shared chat commits coaching and survives panel reload', async ({

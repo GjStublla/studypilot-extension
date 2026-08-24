@@ -20,7 +20,6 @@ import {
   type CoachingRequest,
   type CoachingResponse,
   type ContextShareSettings,
-  type DashboardSaveResult,
   type PageContext,
   type StudyAction,
   type StudyFolder,
@@ -129,7 +128,6 @@ export function FloatingStudyPilot({
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [transcript, setTranscript] = useState<StudyTranscriptTurn[]>([]);
   const [cardScreenshotDataUrl, setCardScreenshotDataUrl] = useState<string | null>(null);
   // Parsed structured content for flashcard/quiz UIs
@@ -192,6 +190,7 @@ export function FloatingStudyPilot({
     chatMessages,
     inFlightChatIds,
     isCreatingChat,
+    isSavingSession,
     isRefreshingChats,
     sessionChatIdRef,
     activeChatIdRef,
@@ -202,6 +201,7 @@ export function FloatingStudyPilot({
     selectDashboardChat,
     createNewDashboardChat,
     continueDashboardSession,
+    saveSessionToDashboard,
     bridgeDashboardSession,
     addInFlightChat,
     removeInFlightChat,
@@ -1089,9 +1089,7 @@ export function FloatingStudyPilot({
   }
 
   async function persistSessionToDashboard(options: SaveSessionOptions = {}) {
-    if (isSaving) return;
-
-    setIsSaving(true);
+    if (isSavingSession) return;
     const questionText = options.questionText ?? (lastQuestion || card.title);
     const answerText = options.answerText ?? card.body;
     const transcriptSnapshot = options.transcriptSnapshot ?? (transcript.length > 0
@@ -1109,9 +1107,10 @@ export function FloatingStudyPilot({
     });
 
     try {
-      const response = await sendRuntimeMessage<DashboardSaveResult>({
-        type: 'STUDYPILOT_SAVE_SESSION',
-        payload: { chatId: options.chatId ?? activeChatId ?? sessionChatIdRef.current ?? '', session, finalize: options.finalize },
+      const response = await saveSessionToDashboard({
+        chatId: options.chatId ?? activeChatId ?? sessionChatIdRef.current ?? '',
+        session,
+        finalize: options.finalize,
       });
 
       if (!response) {
@@ -1140,8 +1139,6 @@ export function FloatingStudyPilot({
             : 'Could not save right now',
         3500,
       );
-    } finally {
-      setIsSaving(false);
     }
   }
 
@@ -1360,7 +1357,7 @@ export function FloatingStudyPilot({
               panelSize={panelSize}
               isPinned={isPinned}
               menuOpen={menuOpen}
-              isSaving={isSaving}
+              isSaving={isSavingSession}
               personality={personality}
               streak={streak}
               isDragging={isDragging.current}
