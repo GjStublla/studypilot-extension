@@ -1,9 +1,4 @@
-import type {
-  DashboardChatMessage,
-  SharedChatContext,
-  StudyPhase,
-  StudyTranscriptTurn,
-} from '@/shared/types';
+import type { DashboardChatMessage, SharedChatContext, StudyPhase, StudyTranscriptTurn } from '@/shared/types';
 
 export interface ChatCardState {
   title: string;
@@ -28,22 +23,18 @@ export function resolveSharedChatId(
   preferredChatId?: string | null,
 ): string | null {
   const requestedChatId = preferredChatId ?? context.activeChatId;
-  return requestedChatId && context.chats.some(chat => chat.id === requestedChatId)
-    ? requestedChatId
-    : null;
+  return requestedChatId && context.chats.some((chat) => chat.id === requestedChatId) ? requestedChatId : null;
 }
 
 /**
  * Convert canonical server messages into the panel's visible chat, transcript,
  * answer card, and phase state. System rows remain durable but are not shown.
  */
-export function presentCanonicalChat(
-  messages: readonly DashboardChatMessage[],
-): CanonicalChatPresentation {
-  const visibleMessages = messages.filter(message => message.role !== 'system');
+export function presentCanonicalChat(messages: readonly DashboardChatMessage[]): CanonicalChatPresentation {
+  const visibleMessages = messages.filter((message) => message.role !== 'system');
   const transcript = visibleMessages.map((message, index) => transcriptTurnFromMessage(message, index));
-  const latestAi = [...visibleMessages].reverse().find(message => message.role === 'ai');
-  const latestUser = [...visibleMessages].reverse().find(message => message.role === 'user');
+  const latestAi = [...visibleMessages].reverse().find((message) => message.role === 'ai');
+  const latestUser = [...visibleMessages].reverse().find((message) => message.role === 'user');
 
   if (latestAi) {
     return {
@@ -80,10 +71,7 @@ export function presentCanonicalChat(
   };
 }
 
-function transcriptTurnFromMessage(
-  message: DashboardChatMessage,
-  index: number,
-): StudyTranscriptTurn {
+function transcriptTurnFromMessage(message: DashboardChatMessage, index: number): StudyTranscriptTurn {
   return {
     id: message.id,
     role: message.role,

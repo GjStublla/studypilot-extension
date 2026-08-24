@@ -1,11 +1,5 @@
 import type { Page } from '@playwright/test';
-import {
-  expect,
-  openFixturePage,
-  seedFixtureSession,
-  test,
-  togglePanelFromExtension,
-} from './fixtures';
+import { expect, openFixturePage, seedFixtureSession, test, togglePanelFromExtension } from './fixtures';
 import {
   clickShadow,
   fillShadow,
@@ -44,19 +38,14 @@ async function denyMicrophone(page: Page) {
 }
 
 test.describe('unpacked StudyPilot MV3 extension', () => {
-  test('loads a service worker and assigns an extension id', async ({
-    context,
-    extensionId,
-  }) => {
+  test('loads a service worker and assigns an extension id', async ({ context, extensionId }) => {
     expect(extensionId).toMatch(/^[a-p]{32}$/);
     const worker = context.serviceWorkers()[0];
     expect(worker).toBeTruthy();
     expect(worker!.url()).toContain(`chrome-extension://${extensionId}/`);
   });
 
-  test('injects the panel host once on an https-equivalent study page', async ({
-    context,
-  }) => {
+  test('injects the panel host once on an https-equivalent study page', async ({ context }) => {
     const page = await openFixturePage(context);
     await expect(page.locator('#studypilot-extension-root')).toHaveCount(1);
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -64,10 +53,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await waitForShadow(page, LAUNCHER);
   });
 
-  test('toolbar-equivalent toggle opens and closes the panel', async ({
-    context,
-    extensionId,
-  }) => {
+  test('toolbar-equivalent toggle opens and closes the panel', async ({ context, extensionId }) => {
     const page = await openFixturePage(context);
     await expect.poll(() => shadowExists(page, LAUNCHER)).toBe(true);
 
@@ -85,10 +71,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
   });
 
-  test('launcher and primary panel controls respond to keyboard activation', async ({
-    context,
-    extensionId,
-  }) => {
+  test('launcher and primary panel controls respond to keyboard activation', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
 
@@ -105,15 +88,12 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
   });
 
-  test('secondary menu actions respond to keyboard activation', async ({
-    context,
-    extensionId,
-  }) => {
+  test('secondary menu actions respond to keyboard activation', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     const errors: string[] = [];
-    page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => {
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
       if (message.type() === 'error') errors.push(message.text());
     });
 
@@ -129,32 +109,32 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(errors).toEqual([]);
   });
 
-  test('visible panel controls are named, focusable, and not clipped', async ({
-    context,
-    extensionId,
-  }) => {
+  test('visible panel controls are named, focusable, and not clipped', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
-    for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
+    for (const viewport of [
+      { width: 360, height: 640 },
+      { width: 390, height: 700 },
+    ]) {
       await page.setViewportSize(viewport);
       await page.reload({ waitUntil: 'domcontentloaded' });
       await waitForShadow(page, LAUNCHER);
       await clickShadow(page, LAUNCHER);
       await waitForShadow(page, DIALOG);
 
-      const controls = (await shadowInteractiveAudit(page)).filter(control => control.visible);
+      const controls = (await shadowInteractiveAudit(page)).filter((control) => control.visible);
       expect(controls.length).toBeGreaterThan(0);
-      expect(controls.every(control => control.label.length > 0)).toBe(true);
-      expect(controls.filter(control => !control.disabled).every(control => control.tabIndex >= 0)).toBe(true);
-      expect(controls.every(control => !control.clipped)).toBe(true);
+      expect(controls.every((control) => control.label.length > 0)).toBe(true);
+      expect(controls.filter((control) => !control.disabled).every((control) => control.tabIndex >= 0)).toBe(true);
+      expect(controls.every((control) => !control.clipped)).toBe(true);
     }
   });
 
   test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {
     const page = await openFixturePage(context);
     const errors: string[] = [];
-    page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => {
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
       if (message.type() === 'error') errors.push(message.text());
     });
     for (let index = 0; index < 4; index += 1) {
@@ -167,10 +147,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(errors).toEqual([]);
   });
 
-  test('privacy defaults keep screenshot and dashboard save off', async ({
-    context,
-    extensionId,
-  }) => {
+  test('privacy defaults keep screenshot and dashboard save off', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     await clickShadow(page, LAUNCHER);
@@ -182,10 +159,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(await shadowChecked(page, SAVE)).toBe(false);
   });
 
-  test('page URL context can be toggled independently of capture defaults', async ({
-    context,
-    extensionId,
-  }) => {
+  test('page URL context can be toggled independently of capture defaults', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     await clickShadow(page, LAUNCHER);
@@ -202,16 +176,22 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
   test('panel stays within 360px and 390px viewports', async ({ context, extensionId }, testInfo) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
-    for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
+    for (const viewport of [
+      { width: 360, height: 640 },
+      { width: 390, height: 700 },
+    ]) {
       await page.setViewportSize(viewport);
       await page.reload({ waitUntil: 'domcontentloaded' });
       await waitForShadow(page, LAUNCHER);
       await clickShadow(page, LAUNCHER);
       await expect
-        .poll(async () => {
-          const box = await shadowBoundingBox(page, DIALOG);
-          return box.y >= 0 && box.y + box.height <= viewport.height;
-        }, { timeout: 3_000 })
+        .poll(
+          async () => {
+            const box = await shadowBoundingBox(page, DIALOG);
+            return box.y >= 0 && box.y + box.height <= viewport.height;
+          },
+          { timeout: 3_000 },
+        )
         .toBe(true);
       // The panel body uses a staggered reveal. Capture after it settles so
       // visual evidence reflects the usable state rather than mid-animation.
@@ -238,10 +218,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     }
   });
 
-  test('microphone denial shows a recoverable message', async ({
-    context,
-    extensionId,
-  }) => {
+  test('microphone denial shows a recoverable message', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     await denyMicrophone(page);
@@ -255,9 +232,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
       );
   });
 
-  test('dashboard handoff opens a tab without production secrets', async ({
-    context,
-  }) => {
+  test('dashboard handoff opens a tab without production secrets', async ({ context }) => {
     const page = await openFixturePage(context);
     await clickShadow(page, LAUNCHER);
 
@@ -275,10 +250,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await opened.close();
   });
 
-  test('connected shared chat commits coaching and survives panel reload', async ({
-    context,
-    extensionId,
-  }) => {
+  test('connected shared chat commits coaching and survives panel reload', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId, CHAT_ID);
     const page = await openFixturePage(context);
     await clickShadow(page, LAUNCHER);
@@ -329,16 +301,13 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
       .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
   });
 
-  test('live start/stop survives panel unmount without stale errors', async ({
-    context,
-    extensionId,
-  }) => {
+  test('live start/stop survives panel unmount without stale errors', async ({ context, extensionId }) => {
     await seedFixtureSession(context, extensionId, CHAT_ID);
     const page = await openFixturePage(context);
     const errors: string[] = [];
     const recordErrors = (target: Page) => {
-      target.on('pageerror', error => errors.push(error.message));
-      target.on('console', message => {
+      target.on('pageerror', (error) => errors.push(error.message));
+      target.on('console', (message) => {
         if (message.type() === 'error') errors.push(message.text());
       });
     };
@@ -348,14 +317,11 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await page.evaluate(() => fetch('/e2e/reset-live-token', { method: 'POST' }));
     await clickShadow(page, LAUNCHER);
     await clickShadow(page, 'button[aria-label="Unmute microphone"]');
+    await expect.poll(() => shadowText(page, STATUS), { timeout: 10_000 }).toMatch(/Starting Live/i);
     await expect
-      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
-      .toMatch(/Starting Live/i);
-    await expect
-      .poll(
-        () => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending),
-        { timeout: 10_000 },
-      )
+      .poll(() => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending), {
+        timeout: 10_000,
+      })
       .toBe(1);
 
     // Unmount and remount the panel while the service worker still owns the
@@ -363,22 +329,17 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await clickShadow(page, 'button[aria-label="Minimize"]');
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
     await clickShadow(page, LAUNCHER);
-    await expect
-      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
-      .toMatch(/Starting Live/i);
+    await expect.poll(() => shadowText(page, STATUS), { timeout: 10_000 }).toMatch(/Starting Live/i);
 
     // Stop the newer, visible operation before releasing the delayed token.
     await clickShadow(page, 'button[aria-label="Mute microphone"]');
-    await expect
-      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
-      .toMatch(/Mic muted|Connect dashboard/i);
+    await expect.poll(() => shadowText(page, STATUS), { timeout: 10_000 }).toMatch(/Mic muted|Connect dashboard/i);
 
     await page.evaluate(() => fetch('/e2e/release-live-token', { method: 'POST' }));
     await expect
-      .poll(
-        () => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending),
-        { timeout: 10_000 },
-      )
+      .poll(() => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending), {
+        timeout: 10_000,
+      })
       .toBe(0);
     await page.waitForTimeout(400);
     expect(errors).toEqual([]);

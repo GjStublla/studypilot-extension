@@ -1,10 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DASHBOARD_URL } from '@/shared/config';
-import {
-  getStoredSupabaseSession,
-  isDashboardBridgeOrigin,
-  readDashboardAuthSession,
-} from './workspaceAuth';
+import { getStoredSupabaseSession, isDashboardBridgeOrigin, readDashboardAuthSession } from './workspaceAuth';
 
 describe('workspace auth boundary', () => {
   afterEach(() => {
@@ -18,14 +14,16 @@ describe('workspace auth boundary', () => {
   });
 
   it('normalizes nested Supabase session storage into the extension shape', () => {
-    expect(getStoredSupabaseSession({
-      currentSession: {
-        access_token: 'access-1',
-        refresh_token: 'refresh-1',
-        expires_at: 123,
-        user: { id: 'user-1', email: 'student@example.com' },
-      },
-    })).toEqual({
+    expect(
+      getStoredSupabaseSession({
+        currentSession: {
+          access_token: 'access-1',
+          refresh_token: 'refresh-1',
+          expires_at: 123,
+          user: { id: 'user-1', email: 'student@example.com' },
+        },
+      }),
+    ).toEqual({
       access_token: 'access-1',
       refresh_token: 'refresh-1',
       user_id: 'user-1',

@@ -4,10 +4,7 @@ export interface CoalescibleSessionSave {
   successNotice?: string;
 }
 
-export function coalesceSessionSave<T extends CoalescibleSessionSave>(
-  previous: T | undefined,
-  incoming: T,
-): T {
+export function coalesceSessionSave<T extends CoalescibleSessionSave>(previous: T | undefined, incoming: T): T {
   if (!previous) return { ...incoming };
 
   const finalize = previous.finalize || incoming.finalize;
@@ -41,13 +38,10 @@ export class PerChatSessionSaveQueue<T extends CoalescibleSessionSave> {
     const existing = this.chats.get(save.chatId);
     if (existing) {
       const activeFinalize = existing.active?.finalize === true;
-      const previous = existing.pending?.save
-        ?? (activeFinalize ? undefined : existing.active ?? undefined);
+      const previous = existing.pending?.save ?? (activeFinalize ? undefined : (existing.active ?? undefined));
       const pendingSave = coalesceSessionSave(previous, save);
       existing.pending = {
-        save: activeFinalize
-          ? { ...pendingSave, finalize: false }
-          : pendingSave,
+        save: activeFinalize ? { ...pendingSave, finalize: false } : pendingSave,
         execute,
       };
       return existing.drainPromise ?? Promise.resolve();

@@ -1,11 +1,6 @@
 import { ExternalLink, ShieldCheck } from 'lucide-react';
 import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
-import {
-  STUDY_FOLDERS,
-  type ContextShareSettings,
-  type PageContext,
-  type StudyFolder,
-} from '@/shared/types';
+import { STUDY_FOLDERS, type ContextShareSettings, type PageContext, type StudyFolder } from '@/shared/types';
 
 export function SettingsSheet({
   page,
@@ -19,14 +14,9 @@ export function SettingsSheet({
   onOpenDashboard: () => void;
 }) {
   const setFlag =
-    (
-      key: keyof Pick<
-        ContextShareSettings,
-        'screenshot' | 'pageUrl' | 'selectedText' | 'saveToDashboard'
-      >,
-    ) =>
+    (key: keyof Pick<ContextShareSettings, 'screenshot' | 'pageUrl' | 'selectedText' | 'saveToDashboard'>) =>
     (event: ChangeEvent<HTMLInputElement>) => {
-      onChange(prev => ({ ...prev, [key]: event.target.checked }));
+      onChange((prev) => ({ ...prev, [key]: event.target.checked }));
     };
 
   return (
@@ -37,20 +27,14 @@ export function SettingsSheet({
       </div>
 
       <p className="sp-settings-copy">
-        Microphone audio is sent to Google Vertex AI while Live is active.
-        Screenshots are sent only when enabled. Chat and session history
-        save only when “Save to dashboard” is enabled.
+        Microphone audio is sent to Google Vertex AI while Live is active. Screenshots are sent only when enabled. Chat
+        and session history save only when “Save to dashboard” is enabled.
       </p>
 
       <div className="sp-settings-group">
         <p className="sp-settings-group-label">Page context</p>
         <div className="sp-settings-toggles">
-          <TogglePill
-            name="pageUrl"
-            label="Page URL"
-            checked={context.pageUrl}
-            onChange={setFlag('pageUrl')}
-          />
+          <TogglePill name="pageUrl" label="Page URL" checked={context.pageUrl} onChange={setFlag('pageUrl')} />
           <TogglePill
             name="selectedText"
             label={page.selectedText ? 'Selected text' : 'No selection'}
@@ -83,14 +67,14 @@ export function SettingsSheet({
           <span>Folder</span>
           <select
             value={context.folder}
-            onChange={event =>
-              onChange(prev => ({
+            onChange={(event) =>
+              onChange((prev) => ({
                 ...prev,
                 folder: event.target.value as StudyFolder,
               }))
             }
           >
-            {STUDY_FOLDERS.map(folder => (
+            {STUDY_FOLDERS.map((folder) => (
               <option key={folder} value={folder}>
                 {folder}
               </option>
@@ -119,12 +103,7 @@ function TogglePill({
 }) {
   return (
     <label className="sp-toggle" data-checked={checked}>
-      <input
-        type="checkbox"
-        name={name}
-        checked={checked}
-        onChange={onChange}
-      />
+      <input type="checkbox" name={name} checked={checked} onChange={onChange} />
       <span>{label}</span>
     </label>
   );

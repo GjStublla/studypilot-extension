@@ -2,18 +2,17 @@ function resolveDashboardUrl() {
   const configured = import.meta.env.VITE_DASHBOARD_URL?.trim();
   if (configured) return configured;
 
-  const localCandidates = [
-    'http://localhost:5173/sessions',
-    'http://127.0.0.1:5173/sessions',
-  ];
+  const localCandidates = ['http://localhost:5173/sessions', 'http://127.0.0.1:5173/sessions'];
 
-  return localCandidates.find(candidate => {
-    try {
-      return new URL(candidate).hostname === 'localhost' || new URL(candidate).hostname === '127.0.0.1';
-    } catch {
-      return false;
-    }
-  }) ?? 'https://app.studypilot.ai/sessions';
+  return (
+    localCandidates.find((candidate) => {
+      try {
+        return new URL(candidate).hostname === 'localhost' || new URL(candidate).hostname === '127.0.0.1';
+      } catch {
+        return false;
+      }
+    }) ?? 'https://app.studypilot.ai/sessions'
+  );
 }
 
 export const DASHBOARD_URL = resolveDashboardUrl();
@@ -31,12 +30,7 @@ export function isLoopbackUrl(value: string | undefined): boolean {
     const { hostname, protocol } = new URL(value);
     return (
       (protocol === 'http:' || protocol === 'https:') &&
-      (
-        hostname === '127.0.0.1' ||
-        hostname === 'localhost' ||
-        hostname === '::1' ||
-        hostname === '[::1]'
-      )
+      (hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]')
     );
   } catch {
     return false;
@@ -44,8 +38,7 @@ export function isLoopbackUrl(value: string | undefined): boolean {
 }
 
 const localModeRequested = import.meta.env.MODE === 'studypilot-local';
-const localEndpointsConfigured =
-  isLoopbackUrl(SUPABASE_URL) && isLoopbackUrl(DASHBOARD_URL);
+const localEndpointsConfigured = isLoopbackUrl(SUPABASE_URL) && isLoopbackUrl(DASHBOARD_URL);
 
 export const LOCAL_DEV_MODE = localModeRequested && localEndpointsConfigured;
 

@@ -9,6 +9,19 @@ Live microphone audio is processed by Google Vertex AI while Live is active. Scr
 > **This repository (`studypilot-extension`) is the canonical Chrome extension.**  
 > The sibling `studypilot/extension` folder is a Live scaffold/mirror only — do not treat it as the shipping source of truth.
 
+## Local quality gate
+
+Run the non-hosted baseline before opening a pull request:
+
+```bash
+npm ci
+npm run quality
+```
+
+The command checks Prettier formatting, ESLint, TypeScript, unit tests, a
+production extension build, and generated manifest policy. It does not contact
+Supabase or require release credentials.
+
 ## AI Integration
 
 The main question box and the Summarize, Explain, Quiz Me, and Flashcards

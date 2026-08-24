@@ -35,10 +35,10 @@ export function ChatSwitcher({
           aria-label="Shared StudyPilot chat"
           value={activeChatId ?? ''}
           disabled={disabled}
-          onChange={event => onSelectChat(event.target.value || null)}
+          onChange={(event) => onSelectChat(event.target.value || null)}
         >
           <option value="">New chat draft</option>
-          {(sharedContext?.chats ?? []).map(chat => (
+          {(sharedContext?.chats ?? []).map((chat) => (
             <option key={chat.id} value={chat.id}>
               {chat.title}
               {chat.rubricTitle

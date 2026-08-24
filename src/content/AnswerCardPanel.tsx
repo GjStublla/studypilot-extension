@@ -51,25 +51,11 @@ export function AnswerCardPanel({
   onFeedback,
 }: AnswerCardPanelProps) {
   return (
-    <motion.section
-      className="sp-card"
-      variants={answerCardReveal}
-      data-thinking={thinking}
-    >
-      <button
-        type="button"
-        className="sp-card-head"
-        aria-expanded={cardOpen}
-        onClick={onToggleOpen}
-      >
+    <motion.section className="sp-card" variants={answerCardReveal} data-thinking={thinking}>
+      <button type="button" className="sp-card-head" aria-expanded={cardOpen} onClick={onToggleOpen}>
         <strong>{card.title}</strong>
         <span className="sp-card-time">Just now</span>
-        <ChevronDown
-          size={20}
-          className="sp-card-chevron"
-          data-open={cardOpen}
-          aria-hidden="true"
-        />
+        <ChevronDown size={20} className="sp-card-chevron" data-open={cardOpen} aria-hidden="true" />
       </button>
 
       <AnimatePresence initial={false}>
@@ -90,10 +76,7 @@ export function AnswerCardPanel({
             )}
             {screenshotDataUrl ? (
               <figure className="sp-card-screenshot">
-                <img
-                  src={screenshotDataUrl}
-                  alt="Screenshot shared with StudyPilot"
-                />
+                <img src={screenshotDataUrl} alt="Screenshot shared with StudyPilot" />
                 <figcaption>
                   <Camera size={13} />
                   <span>Screenshot shared</span>
@@ -109,11 +92,7 @@ export function AnswerCardPanel({
               >
                 <Volume2 size={19} />
               </button>
-              <button
-                type="button"
-                aria-label="Copy answer"
-                onClick={() => void onCopy()}
-              >
+              <button type="button" aria-label="Copy answer" onClick={() => void onCopy()}>
                 {copied ? <Check size={19} /> : <Copy size={19} />}
               </button>
               <span className="sp-card-spacer" />

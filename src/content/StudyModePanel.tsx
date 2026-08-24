@@ -1,10 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, HelpCircle, Layers } from 'lucide-react';
-import {
-  FlashcardViewer,
-  QuizViewer,
-  type StructuredCard,
-} from './PanelComponents';
+import { FlashcardViewer, QuizViewer, type StructuredCard } from './PanelComponents';
 
 export type StudyMode = 'flashcards' | 'quiz';
 
@@ -38,19 +34,20 @@ export function StudyModePanel({
         transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="sp-study-header">
-          <button
-            type="button"
-            className="sp-study-back"
-            aria-label="Back to chat"
-            onClick={onClose}
-          >
+          <button type="button" className="sp-study-back" aria-label="Back to chat" onClick={onClose}>
             <ArrowLeft size={17} strokeWidth={2} />
             <span>Back</span>
           </button>
           <span className="sp-study-title">
-            {mode === 'flashcards'
-              ? <><Layers size={15} strokeWidth={2} /> Flashcards</>
-              : <><HelpCircle size={15} strokeWidth={2} /> Quiz</>}
+            {mode === 'flashcards' ? (
+              <>
+                <Layers size={15} strokeWidth={2} /> Flashcards
+              </>
+            ) : (
+              <>
+                <HelpCircle size={15} strokeWidth={2} /> Quiz
+              </>
+            )}
           </span>
           <button
             type="button"
@@ -72,7 +69,9 @@ export function StudyModePanel({
         ) : error ? (
           <div className="sp-study-error">
             <p>{error}</p>
-            <button type="button" onClick={() => onRegenerate(mode)}>Try again</button>
+            <button type="button" onClick={() => onRegenerate(mode)}>
+              Try again
+            </button>
           </div>
         ) : card?.type === 'flashcards' ? (
           <FlashcardViewer items={card.items} />

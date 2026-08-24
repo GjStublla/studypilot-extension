@@ -45,10 +45,9 @@ describe('speech utilities', () => {
     );
 
     try {
-      const utterance = createSpeechUtterance(
-        'Read this explanation',
-        { getVoices: () => [selected] } as SpeechSynthesis,
-      );
+      const utterance = createSpeechUtterance('Read this explanation', {
+        getVoices: () => [selected],
+      } as SpeechSynthesis);
 
       expect(utterance).toMatchObject({
         text: 'Read this explanation',

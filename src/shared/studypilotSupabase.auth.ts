@@ -62,8 +62,8 @@ function chromeStorageAvailable(): boolean {
 export function storageGet<T>(key: string): Promise<T | null> {
   if (!chromeStorageAvailable()) return Promise.resolve(null);
 
-  return new Promise(resolve => {
-    chrome.storage.local.get(key, result => {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(key, (result) => {
       resolve((result[key] as T | undefined) ?? null);
     });
   });
@@ -144,10 +144,7 @@ export async function ensureAuthenticatedSession(): Promise<AuthenticatedSession
       if (!LOCAL_DEV_MODE) {
         return normalized;
       }
-      if (
-        isConfiguredLocalSession(stored) &&
-        await validateLocalAccessToken(normalized.accessToken)
-      ) {
+      if (isConfiguredLocalSession(stored) && (await validateLocalAccessToken(normalized.accessToken))) {
         validatedLocalSession = normalized;
         return normalized;
       }
@@ -180,10 +177,7 @@ async function validateLocalAccessToken(accessToken: string): Promise<boolean> {
 
 function isConfiguredLocalSession(session: ExtensionAuthSession): boolean {
   const payload = decodeJwtPayload(session.access_token);
-  return (
-    (session.email ?? payload?.email) === LOCAL_DEV_EMAIL &&
-    payload?.iss === `${SUPABASE_URL}/auth/v1`
-  );
+  return (session.email ?? payload?.email) === LOCAL_DEV_EMAIL && payload?.iss === `${SUPABASE_URL}/auth/v1`;
 }
 
 function ensureLocalDevSession(): Promise<AuthenticatedSession> {
@@ -241,10 +235,7 @@ async function createLocalDevSession(): Promise<AuthenticatedSession> {
   return validatedLocalSession;
 }
 
-async function localAuthFetch(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<{ data: LocalAuthResponse }> {
+async function localAuthFetch(path: string, body: Record<string, unknown>): Promise<{ data: LocalAuthResponse }> {
   let response: Response;
 
   try {
@@ -259,12 +250,12 @@ async function localAuthFetch(
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Local Supabase is unavailable: ${detail}`);
+    throw new Error(`Local Supabase is unavailable: ${detail}`, { cause: error });
   }
 
   let data: LocalAuthResponse = {};
   try {
-    data = await response.json() as LocalAuthResponse;
+    data = (await response.json()) as LocalAuthResponse;
   } catch {
     // The final retry below reports a stable error if no session is present.
   }
@@ -281,9 +272,7 @@ function sessionFromLocalAuth(data: LocalAuthResponse): ExtensionAuthSession | n
     email: data.user.email ?? LOCAL_DEV_EMAIL,
     expires_at:
       data.expires_at ??
-      (typeof data.expires_in === 'number'
-        ? Math.floor(Date.now() / 1000) + data.expires_in
-        : undefined),
+      (typeof data.expires_in === 'number' ? Math.floor(Date.now() / 1000) + data.expires_in : undefined),
   };
 }
 
@@ -367,7 +356,7 @@ export async function restFetch(path: string, init: RequestInit = {}): Promise<R
 
 export async function parseJsonResponse<T>(response: Response): Promise<T> {
   try {
-    return await response.json() as T;
+    return (await response.json()) as T;
   } catch {
     throw new Error(response.statusText || `Request failed with ${response.status}`);
   }
@@ -388,9 +377,7 @@ export async function responseError(response: Response): Promise<Error> {
   }
 }
 
-export async function storeExtensionSession(
-  session: ExtensionAuthSession,
-): Promise<ExtensionAuthState> {
+export async function storeExtensionSession(session: ExtensionAuthSession): Promise<ExtensionAuthState> {
   const normalized = normalizeSession(session);
 
   await writeStoredSession({

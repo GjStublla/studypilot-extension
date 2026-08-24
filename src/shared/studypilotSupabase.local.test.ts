@@ -17,16 +17,15 @@ vi.mock('./config', () => ({
 
 function accessToken(): string {
   const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-  const payload = btoa(JSON.stringify({
-    sub: localUserId,
-    email: localEmail,
-    exp: Math.floor(Date.now() / 1000) + 3600,
-    iss: `${localUrl}/auth/v1`,
-  }));
-  return `${header}.${payload}.signature`
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
+  const payload = btoa(
+    JSON.stringify({
+      sub: localUserId,
+      email: localEmail,
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      iss: `${localUrl}/auth/v1`,
+    }),
+  );
+  return `${header}.${payload}.signature`.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
 beforeAll(() => {
@@ -51,17 +50,26 @@ beforeAll(() => {
     },
   });
 
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-    access_token: accessToken(),
-    expires_in: 3600,
-    user: {
-      id: localUserId,
-      email: localEmail,
-    },
-  }), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  })));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: accessToken(),
+            expires_in: 3600,
+            user: {
+              id: localUserId,
+              email: localEmail,
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+    ),
+  );
 });
 
 describe('local extension authentication', () => {

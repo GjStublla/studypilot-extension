@@ -1,12 +1,6 @@
 import { BookmarkCheck, Timer, X } from 'lucide-react';
 import type { DashboardSessionSummary, SharedChatContext, StudyAction } from '@/shared/types';
-import {
-  ExplainGlyph,
-  FlashcardsGlyph,
-  QuizGlyph,
-  QuickChip,
-  SummarizeGlyph,
-} from './PanelComponents';
+import { ExplainGlyph, FlashcardsGlyph, QuizGlyph, QuickChip, SummarizeGlyph } from './PanelComponents';
 
 export interface QuickActionsProps {
   sharedContext: SharedChatContext | null;
@@ -44,10 +38,7 @@ export function QuickActions({
         <FlashcardsGlyph />
       </QuickChip>
       {sharedContext?.sessions[0] ? (
-        <QuickChip
-          label="Continue session"
-          onClick={() => onContinueSession(sharedContext.sessions[0])}
-        >
+        <QuickChip label="Continue session" onClick={() => onContinueSession(sharedContext.sessions[0])}>
           <BookmarkCheck size={14} strokeWidth={2.2} />
         </QuickChip>
       ) : null}

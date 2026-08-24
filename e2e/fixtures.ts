@@ -11,6 +11,8 @@ export const test = base.extend<{
   context: BrowserContext;
   extensionId: string;
 }>({
+  // Playwright requires the fixture argument to use object destructuring even when unused.
+  // eslint-disable-next-line no-empty-pattern
   context: async ({}, use) => {
     if (!existsSync(path.join(extensionPath, 'manifest.json'))) {
       throw new Error(
@@ -21,10 +23,7 @@ export const test = base.extend<{
     const context = await chromium.launchPersistentContext('', {
       channel: 'chromium',
       headless: process.env.PW_HEADED === '1' ? false : true,
-      args: [
-        `--disable-extensions-except=${extensionPath}`,
-        `--load-extension=${extensionPath}`,
-      ],
+      args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`],
     });
 
     await use(context);
@@ -71,10 +70,7 @@ async function withExtensionPage<T>(
   }
 }
 
-export async function togglePanelFromExtension(
-  context: BrowserContext,
-  extensionId: string,
-): Promise<void> {
+export async function togglePanelFromExtension(context: BrowserContext, extensionId: string): Promise<void> {
   await withExtensionPage(context, extensionId, (extPage) =>
     extPage.evaluate(async () => {
       const tabs = await chrome.tabs.query({ url: 'http://127.0.0.1:4177/*' });

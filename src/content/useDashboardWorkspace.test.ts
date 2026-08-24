@@ -3,13 +3,15 @@ import { isCurrentWorkspaceRequest } from './useDashboardWorkspace';
 
 describe('dashboard workspace request boundary', () => {
   it('accepts only the mounted latest request for the active chat', () => {
-    expect(isCurrentWorkspaceRequest({
-      mounted: true,
-      requestSequence: 3,
-      latestSequence: 3,
-      requestedChatId: 'chat-a',
-      activeChatId: 'chat-a',
-    })).toBe(true);
+    expect(
+      isCurrentWorkspaceRequest({
+        mounted: true,
+        requestSequence: 3,
+        latestSequence: 3,
+        requestedChatId: 'chat-a',
+        activeChatId: 'chat-a',
+      }),
+    ).toBe(true);
   });
 
   it('rejects unmounted, superseded, and inactive-chat responses', () => {
@@ -26,10 +28,12 @@ describe('dashboard workspace request boundary', () => {
   });
 
   it('supports context refreshes that do not target one chat', () => {
-    expect(isCurrentWorkspaceRequest({
-      mounted: true,
-      requestSequence: 4,
-      latestSequence: 4,
-    })).toBe(true);
+    expect(
+      isCurrentWorkspaceRequest({
+        mounted: true,
+        requestSequence: 4,
+        latestSequence: 4,
+      }),
+    ).toBe(true);
   });
 });

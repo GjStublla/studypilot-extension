@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DashboardChatMessage, SharedChatContext } from '@/shared/types';
 import { presentCanonicalChat, resolveSharedChatId } from './dashboardChatState';
 
-function message(
-  role: DashboardChatMessage['role'],
-  text: string,
-  sequence: number,
-): DashboardChatMessage {
+function message(role: DashboardChatMessage['role'], text: string, sequence: number): DashboardChatMessage {
   return {
     id: `message-${sequence}`,
     chatId: 'chat-1',
@@ -64,11 +60,8 @@ describe('presentCanonicalChat', () => {
       message('ai', 'Here is the explanation', 2),
     ]);
 
-    expect(presentation.messages.map(item => item.role)).toEqual(['user', 'ai']);
-    expect(presentation.transcript.map(item => item.text)).toEqual([
-      'Explain this',
-      'Here is the explanation',
-    ]);
+    expect(presentation.messages.map((item) => item.role)).toEqual(['user', 'ai']);
+    expect(presentation.transcript.map((item) => item.text)).toEqual(['Explain this', 'Here is the explanation']);
     expect(presentation.lastQuestion).toBe('Explain this');
     expect(presentation.card).toEqual({
       title: 'Coach response',

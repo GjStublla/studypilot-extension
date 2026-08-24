@@ -41,27 +41,17 @@ describe('PerChatSessionSaveQueue', () => {
     const queue = new PerChatSessionSaveQueue<TestSave>();
     const calls: TestSave[] = [];
     const releases: Array<() => void> = [];
-    const execute = (save: TestSave) => new Promise<void>(resolve => {
-      calls.push(save);
-      releases.push(resolve);
-    });
+    const execute = (save: TestSave) =>
+      new Promise<void>((resolve) => {
+        calls.push(save);
+        releases.push(resolve);
+      });
 
-    const first = queue.enqueue(
-      { chatId: 'chat-1', finalize: false, transcript: ['first'] },
-      execute,
-    );
-    const second = queue.enqueue(
-      { chatId: 'chat-1', finalize: true, transcript: ['second'] },
-      execute,
-    );
-    const third = queue.enqueue(
-      { chatId: 'chat-1', finalize: false, transcript: ['third'] },
-      execute,
-    );
+    const first = queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['first'] }, execute);
+    const second = queue.enqueue({ chatId: 'chat-1', finalize: true, transcript: ['second'] }, execute);
+    const third = queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['third'] }, execute);
 
-    expect(calls).toEqual([
-      { chatId: 'chat-1', finalize: false, transcript: ['first'] },
-    ]);
+    expect(calls).toEqual([{ chatId: 'chat-1', finalize: false, transcript: ['first'] }]);
 
     releases.shift()?.();
     await vi.waitFor(() => expect(calls).toHaveLength(2));
@@ -80,23 +70,16 @@ describe('PerChatSessionSaveQueue', () => {
     const queue = new PerChatSessionSaveQueue<TestSave>();
     const calls: TestSave[] = [];
     const releases: Array<() => void> = [];
-    const execute = (save: TestSave) => new Promise<void>(resolve => {
-      calls.push(save);
-      releases.push(resolve);
-    });
+    const execute = (save: TestSave) =>
+      new Promise<void>((resolve) => {
+        calls.push(save);
+        releases.push(resolve);
+      });
 
-    const finalize = queue.enqueue(
-      { chatId: 'chat-1', finalize: true, transcript: ['finalized'] },
-      execute,
-    );
-    const newerSave = queue.enqueue(
-      { chatId: 'chat-1', finalize: true, transcript: ['newer response'] },
-      execute,
-    );
+    const finalize = queue.enqueue({ chatId: 'chat-1', finalize: true, transcript: ['finalized'] }, execute);
+    const newerSave = queue.enqueue({ chatId: 'chat-1', finalize: true, transcript: ['newer response'] }, execute);
 
-    expect(calls).toEqual([
-      { chatId: 'chat-1', finalize: true, transcript: ['finalized'] },
-    ]);
+    expect(calls).toEqual([{ chatId: 'chat-1', finalize: true, transcript: ['finalized'] }]);
 
     releases.shift()?.();
     await vi.waitFor(() => expect(calls).toHaveLength(2));
@@ -112,13 +95,14 @@ describe('PerChatSessionSaveQueue', () => {
 
   it('runs different chats independently while reporting aggregate busy state', async () => {
     const busyStates: boolean[] = [];
-    const queue = new PerChatSessionSaveQueue<TestSave>(busy => busyStates.push(busy));
+    const queue = new PerChatSessionSaveQueue<TestSave>((busy) => busyStates.push(busy));
     const releases: Array<() => void> = [];
     const calls: string[] = [];
-    const execute = (save: TestSave) => new Promise<void>(resolve => {
-      calls.push(save.chatId);
-      releases.push(resolve);
-    });
+    const execute = (save: TestSave) =>
+      new Promise<void>((resolve) => {
+        calls.push(save.chatId);
+        releases.push(resolve);
+      });
 
     const first = queue.enqueue({ chatId: 'chat-a', finalize: false, transcript: ['a'] }, execute);
     const second = queue.enqueue({ chatId: 'chat-b', finalize: false, transcript: ['b'] }, execute);
@@ -147,7 +131,7 @@ describe('PerChatSessionSaveQueue', () => {
 
     await expect(first).rejects.toThrow('save failed');
     await expect(second).rejects.toThrow('save failed');
-    expect(calls.map(save => save.transcript)).toEqual([['first'], ['second']]);
+    expect(calls.map((save) => save.transcript)).toEqual([['first'], ['second']]);
 
     await expect(
       queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['recovery'] }, execute),

@@ -1,8 +1,4 @@
-export const STUDY_FOLDERS = [
-  'Biology 101',
-  'History Midterm',
-  'Programming Assignment',
-] as const;
+export const STUDY_FOLDERS = ['Biology 101', 'History Midterm', 'Programming Assignment'] as const;
 
 export type StudyFolder = (typeof STUDY_FOLDERS)[number];
 
@@ -11,11 +7,7 @@ export type StudyPhase = 'idle' | 'thinking' | 'answer' | 'saved';
 export type StudyAction = 'explain' | 'summarize' | 'quiz' | 'flashcards';
 
 export type StudyPilotSessionMode =
-  | 'Essay Coach'
-  | 'Presentation Coach'
-  | 'Study Coach'
-  | 'Lecture'
-  | 'Research Reader';
+  'Essay Coach' | 'Presentation Coach' | 'Study Coach' | 'Lecture' | 'Research Reader';
 
 export interface PageContext {
   sourceUrl: string;
@@ -53,15 +45,10 @@ export const DEFAULT_CONTEXT_SHARE_SETTINGS: ContextShareSettings = {
   folder: 'Biology 101',
 };
 
-export function isSessionPrivacyOptions(
-  value: unknown,
-): value is SessionPrivacyOptions {
+export function isSessionPrivacyOptions(value: unknown): value is SessionPrivacyOptions {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
-  return (
-    typeof record.captureScreenshot === 'boolean' &&
-    typeof record.saveToDashboard === 'boolean'
-  );
+  return typeof record.captureScreenshot === 'boolean' && typeof record.saveToDashboard === 'boolean';
 }
 
 export function sessionPrivacyFromContext(
@@ -219,14 +206,7 @@ export interface StudyTranscriptTurn {
   createdAt?: string;
 }
 
-export type LiveUiState =
-  | 'idle'
-  | 'starting'
-  | 'connecting'
-  | 'live'
-  | 'paused'
-  | 'stopping'
-  | 'error';
+export type LiveUiState = 'idle' | 'starting' | 'connecting' | 'live' | 'paused' | 'stopping' | 'error';
 
 export type LiveTokenStatus = 'ready' | 'fallback' | 'error';
 

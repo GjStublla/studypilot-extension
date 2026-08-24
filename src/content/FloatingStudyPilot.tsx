@@ -20,12 +20,7 @@ import {
   type StudyPhase,
   type StudyTranscriptTurn,
 } from '@/shared/types';
-import {
-  type FlashcardItem,
-  type OrbState,
-  type QuizItem,
-  type StructuredCard,
-} from './PanelComponents';
+import { type FlashcardItem, type OrbState, type QuizItem, type StructuredCard } from './PanelComponents';
 import type { AnswerCardData } from './AnswerCardPanel';
 import { SelectionTooltip, type SelectionTooltipData } from './SelectionTooltip';
 export { SettingsSheet } from './ContextSettings';
@@ -76,15 +71,11 @@ function getPageContext(): PageContext {
 
 function isExtensionRuntime(): boolean {
   return (
-    typeof chrome !== 'undefined' &&
-    Boolean(chrome.runtime?.id) &&
-    typeof chrome.runtime.sendMessage === 'function'
+    typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id) && typeof chrome.runtime.sendMessage === 'function'
   );
 }
 
-async function sendRuntimeMessage<T>(
-  message: StudyPilotRuntimeMessage,
-): Promise<T | null> {
+async function sendRuntimeMessage<T>(message: StudyPilotRuntimeMessage): Promise<T | null> {
   if (!isExtensionRuntime()) return null;
   const response = await chrome.runtime.sendMessage(message);
   if (!response?.ok) {
@@ -93,11 +84,7 @@ async function sendRuntimeMessage<T>(
   return response.data as T;
 }
 
-export function FloatingStudyPilot({
-  defaultOpen = false,
-}: {
-  defaultOpen?: boolean;
-}) {
+export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: boolean }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const [isPinned, setIsPinned] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -138,9 +125,7 @@ export function FloatingStudyPilot({
   const confettiRef = useRef<HTMLCanvasElement | null>(null);
   const [pomodoroPickerOpen, setPomodoroPickerOpen] = useState(false);
 
-  const [context, setContext] = useState<ContextShareSettings>(
-    DEFAULT_CONTEXT_SHARE_SETTINGS,
-  );
+  const [context, setContext] = useState<ContextShareSettings>(DEFAULT_CONTEXT_SHARE_SETTINGS);
 
   const liveLockRef = useRef(false);
   const workspace = useDashboardWorkspace({
@@ -148,7 +133,7 @@ export function FloatingStudyPilot({
     sendRuntimeMessage,
     isExtensionRuntime,
     isLiveLocked: () => liveLockRef.current,
-    onCanonicalPresentation: presentation => {
+    onCanonicalPresentation: (presentation) => {
       setTranscript(presentation.transcript);
       setLastQuestion(presentation.lastQuestion);
       setCard(presentation.card);
@@ -159,7 +144,7 @@ export function FloatingStudyPilot({
       setQuestion('');
       setLastQuestion('');
     },
-    onChatReset: chatId => {
+    onChatReset: (chatId) => {
       setTranscript([]);
       setCardScreenshotDataUrl(null);
       setCard({
@@ -196,23 +181,14 @@ export function FloatingStudyPilot({
     removeInFlightChat,
   } = workspace;
 
-  const {
-    liveState,
-    liveFrozen,
-    liveFallback,
-    micOn,
-    paused,
-    liveBusy,
-    applyLiveStatus,
-    toggleMic,
-    togglePause,
-  } = useLiveCoaching({
-    getActiveChatId: workspace.getActiveChatId,
-    context,
-    flashNotice,
-    onVoiceQuestion: (voiceQuestion) => void runStudyAction('explain', voiceQuestion, true),
-    sendRuntimeMessage,
-  });
+  const { liveState, liveFrozen, liveFallback, micOn, paused, liveBusy, applyLiveStatus, toggleMic, togglePause } =
+    useLiveCoaching({
+      getActiveChatId: workspace.getActiveChatId,
+      context,
+      flashNotice,
+      onVoiceQuestion: (voiceQuestion) => void runStudyAction('explain', voiceQuestion, true),
+      sendRuntimeMessage,
+    });
   liveLockRef.current = liveFrozen || liveBusy;
 
   // ── Drag-to-reposition ───────────────────────────────────────────────────────
@@ -223,8 +199,10 @@ export function FloatingStudyPilot({
   const isDragging = useRef(false);
 
   // Resize state — null = use default CSS dimensions
-  const MIN_W = 300; const MAX_W = 600;
-  const MIN_H = 480; const MAX_H = 860;
+  const MIN_W = 300;
+  const MAX_W = 600;
+  const MIN_H = 480;
+  const MAX_H = 860;
   const [panelSize, setPanelSize] = useState<{ w: number; h: number } | null>(null);
   const resizeStart = useRef<{ px: number; py: number; w: number; h: number } | null>(null);
 
@@ -485,7 +463,7 @@ export function FloatingStudyPilot({
         } else if (message.type === 'STUDYPILOT_LIVE_WARNING' && message.message) {
           flashNotice(message.message, 3600);
         } else if (message.type === 'STUDYPILOT_LIVE_TRANSCRIPT' && message.finalized && message.text) {
-          setTranscript(prev => [
+          setTranscript((prev) => [
             ...prev,
             {
               id: crypto.randomUUID(),
@@ -506,16 +484,20 @@ export function FloatingStudyPilot({
       }
       if (!isStudyPilotRuntimeMessage(message)) return false;
       if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
-      if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen(value => !value);
+      if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen((value) => !value);
       return false;
     };
 
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
+    // The runtime listener is registered once; its handlers only use stable refs/setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-registering on each render duplicates runtime listeners.
   }, []);
 
   useEffect(() => {
     void bridgeDashboardSession();
+    // Bridge once on mount; visibility/focus events below handle later synchronization.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the bridge is a mount-time handshake.
   }, []);
 
   useEffect(() => {
@@ -536,6 +518,8 @@ export function FloatingStudyPilot({
       window.removeEventListener('focus', syncSession);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
+    // Register the page lifecycle listeners once for this panel instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks intentionally retain the mount-time bridge.
   }, []);
 
   useEffect(() => {
@@ -587,7 +571,7 @@ export function FloatingStudyPilot({
     function handleMouseDown(e: MouseEvent) {
       const path = e.composedPath ? e.composedPath() : [];
       const isInsideTooltip = path.some(
-        (el) => el instanceof HTMLElement && el.classList && el.classList.contains('sp-selection-tooltip')
+        (el) => el instanceof HTMLElement && el.classList && el.classList.contains('sp-selection-tooltip'),
       );
       if (isInsideTooltip) return;
       if (!tooltipLock) {
@@ -607,6 +591,8 @@ export function FloatingStudyPilot({
 
   useEffect(() => {
     if (isOpen) void refreshExtensionWorkspace();
+    // Refresh only on open transitions; the workspace controller owns request sequencing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- including the render-local controller would loop while open.
   }, [isOpen]);
 
   useEffect(() => {
@@ -621,17 +607,19 @@ export function FloatingStudyPilot({
   }, [isOpen, isPinned]);
 
   useEffect(() => {
+    const scheduledTimersSnapshot = scheduledTimers.current;
+    const audioContextsSnapshot = audioContexts.current;
     return () => {
       panelMounted.current = false;
       panelOperationSequence.current += 1;
-      for (const timer of scheduledTimers.current) window.clearTimeout(timer);
-      scheduledTimers.current.clear();
+      for (const timer of scheduledTimersSnapshot) window.clearTimeout(timer);
+      scheduledTimersSnapshot.clear();
       noticeTimer.current = undefined;
       copiedTimer.current = undefined;
       confettiHideTimer.current = undefined;
       stopConfettiAnimation();
-      for (const ctx of audioContexts.current) void ctx.close().catch(() => {});
-      audioContexts.current.clear();
+      for (const ctx of audioContextsSnapshot) void ctx.close().catch(() => {});
+      audioContextsSnapshot.clear();
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     };
   }, []);
@@ -687,7 +675,7 @@ export function FloatingStudyPilot({
         playChime();
         void runStudyAction(
           'explain',
-          `The student just completed a ${pomodoroDuration}-minute focus session. Briefly congratulate them and ask them what 2 things they learned. Keep it very short.`
+          `The student just completed a ${pomodoroDuration}-minute focus session. Briefly congratulate them and ask them what 2 things they learned. Keep it very short.`,
         );
       }
     };
@@ -695,6 +683,9 @@ export function FloatingStudyPilot({
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
+    // The interval is keyed by the deadline; action functions are intentionally
+    // read from the render that created the timer to avoid restarting it every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pomodoroEndTime is the lifecycle key.
   }, [pomodoroEndTime]);
 
   function startPomodoro(minutes: number) {
@@ -743,7 +734,9 @@ export function FloatingStudyPilot({
         osc.stop(t + 0.25);
       });
       scheduleAudioContextClose(ctx, 800);
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
   }
   function playChime() {
     try {
@@ -764,7 +757,9 @@ export function FloatingStudyPilot({
         osc.stop(start + 0.6);
       });
       scheduleAudioContextClose(ctx, 2000);
-    } catch { /* no audio context available */ }
+    } catch {
+      /* no audio context available */
+    }
   }
 
   function playSaveSound() {
@@ -782,7 +777,9 @@ export function FloatingStudyPilot({
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
       scheduleAudioContextClose(ctx, 500);
-    } catch { /* no audio context available */ }
+    } catch {
+      /* no audio context available */
+    }
   }
 
   // ── Streak logic ─────────────────────────────────────────────────────────
@@ -792,7 +789,8 @@ export function FloatingStudyPilot({
     chrome.storage.local.get(['streakDate', 'streakCount'], (res) => {
       const lastDate = res.streakDate as string | undefined;
       const count = (res.streakCount as number | undefined) ?? 0;
-      const newCount = lastDate === today ? count : (lastDate === new Date(Date.now() - 86400000).toDateString() ? count + 1 : 1);
+      const newCount =
+        lastDate === today ? count : lastDate === new Date(Date.now() - 86400000).toDateString() ? count + 1 : 1;
       setStreak(newCount);
       chrome.storage.local.set({ streakDate: today, streakCount: newCount }).catch(() => {});
     });
@@ -809,34 +807,34 @@ export function FloatingStudyPilot({
     }, 3500);
   }
 
-  const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
+  const activeChat = sharedContext?.chats.find((chat) => chat.id === activeChatId) ?? null;
   const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
   const orbState: OrbState =
     isActiveChatSending || phase === 'thinking' || liveState === 'connecting' || liveState === 'starting'
-    ? 'thinking'
-    : paused || liveState === 'paused'
-      ? 'paused'
-      : micOn || liveState === 'live'
-        ? 'listening'
-        : 'muted';
+      ? 'thinking'
+      : paused || liveState === 'paused'
+        ? 'paused'
+        : micOn || liveState === 'live'
+          ? 'listening'
+          : 'muted';
 
   const statusText = notice
     ? notice
     : authState?.connected === false
       ? 'Connect dashboard'
-    : liveFallback === 'text-coaching'
-      ? 'Live unavailable — use text coaching'
-    : liveState === 'connecting' || liveState === 'starting'
-      ? 'Starting Live...'
-    : liveState === 'live'
-      ? 'Live coaching...'
-    : isActiveChatSending || phase === 'thinking'
-      ? 'Thinking...'
-      : paused || liveState === 'paused'
-        ? 'Paused'
-        : micOn
-          ? 'Listening...'
-          : 'Mic muted';
+      : liveFallback === 'text-coaching'
+        ? 'Live unavailable — use text coaching'
+        : liveState === 'connecting' || liveState === 'starting'
+          ? 'Starting Live...'
+          : liveState === 'live'
+            ? 'Live coaching...'
+            : isActiveChatSending || phase === 'thinking'
+              ? 'Thinking...'
+              : paused || liveState === 'paused'
+                ? 'Paused'
+                : micOn
+                  ? 'Listening...'
+                  : 'Mic muted';
 
   const sourceLabel = useMemo(() => {
     if (!page.host) return 'this page';
@@ -862,10 +860,16 @@ export function FloatingStudyPilot({
     const prompt = customQuestion?.trim();
     const targetChatId = activeChatId ?? sessionChatIdRef.current;
     let personalityPrefix = '';
-    if (personality === 'Strict Tutor') personalityPrefix = 'You are a Strict Tutor. Be demanding, push the student to excel, and accept no nonsense. ';
-    if (personality === 'Supportive Friend') personalityPrefix = 'You are a Supportive Friend. Be extremely encouraging, casual, and use emojis. ';
-    if (personality === 'Socratic Guide') personalityPrefix = 'You are a Socratic Guide. Do NOT give the student answers directly. Instead, ask 2-3 guiding questions that lead them to discover the answer themselves. ';
-    if (personality === 'Gen Z') personalityPrefix = 'You are a Gen Z student. Use modern internet slang and a very casual tone, but still be helpful. ';
+    if (personality === 'Strict Tutor')
+      personalityPrefix = 'You are a Strict Tutor. Be demanding, push the student to excel, and accept no nonsense. ';
+    if (personality === 'Supportive Friend')
+      personalityPrefix = 'You are a Supportive Friend. Be extremely encouraging, casual, and use emojis. ';
+    if (personality === 'Socratic Guide')
+      personalityPrefix =
+        'You are a Socratic Guide. Do NOT give the student answers directly. Instead, ask 2-3 guiding questions that lead them to discover the answer themselves. ';
+    if (personality === 'Gen Z')
+      personalityPrefix =
+        'You are a Gen Z student. Use modern internet slang and a very casual tone, but still be helpful. ';
 
     const studentText = personalityPrefix + (prompt || defaultPromptForAction(action));
     const priorTranscript = transcript;
@@ -965,7 +969,10 @@ export function FloatingStudyPilot({
       if (action === 'flashcards' || action === 'quiz') {
         try {
           // Strip markdown code fences if the model wrapped the JSON anyway
-          const jsonText = responseText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+          const jsonText = responseText
+            .replace(/^```(?:json)?\s*/i, '')
+            .replace(/\s*```$/, '')
+            .trim();
           const raw = JSON.parse(jsonText) as unknown;
           if (Array.isArray(raw) && raw.length > 0) {
             if (action === 'flashcards' && 'q' in (raw[0] as object)) {
@@ -1038,12 +1045,11 @@ export function FloatingStudyPilot({
       if (!isCurrentPanelOperationSequence(operationSequence)) return;
       const message = error instanceof Error ? error.message : 'StudyPilot AI could not respond.';
       setCard({
-        title: message.includes('connected') || message.includes('signed') || message.includes('session')
-          ? 'Connect StudyPilot'
-          : 'Coach unavailable',
-        body: message.includes('StudyPilot is not connected')
-          ? STUDYPILOT_CONNECT_MESSAGE
-          : message,
+        title:
+          message.includes('connected') || message.includes('signed') || message.includes('session')
+            ? 'Connect StudyPilot'
+            : 'Coach unavailable',
+        body: message.includes('StudyPilot is not connected') ? STUDYPILOT_CONNECT_MESSAGE : message,
       });
       setCardOpen(true);
       setPhase('answer');
@@ -1070,9 +1076,8 @@ export function FloatingStudyPilot({
     try {
       const bodyText = overrideText || document.body?.innerText || '';
       const cleaned = bodyText.replace(/\s{3,}/g, '\n\n').trim();
-      const pageText = cleaned.length > 80
-        ? (cleaned.length > 12000 ? `${cleaned.slice(0, 12000)}…` : cleaned)
-        : undefined;
+      const pageText =
+        cleaned.length > 80 ? (cleaned.length > 12000 ? `${cleaned.slice(0, 12000)}…` : cleaned) : undefined;
       freshPage = {
         ...getPageContext(),
         ...(overrideText ? { selectedText: overrideText } : {}),
@@ -1117,8 +1122,11 @@ export function FloatingStudyPilot({
       if (!response?.text.trim()) throw new Error('No response from StudyPilot AI.');
 
       // Strip any markdown fences the model adds despite instructions
-      let jsonText = response.text.trim()
-        .replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+      let jsonText = response.text
+        .trim()
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/i, '')
+        .trim();
 
       // Repair truncated JSON — the SSE stream sometimes ends before the JSON is complete.
       // Work backwards to find the last fully-closed object, then close the array.
@@ -1163,7 +1171,7 @@ export function FloatingStudyPilot({
           setStructuredCard({ type: 'flashcards', items: raw as FlashcardItem[] });
         } else if (typeof first.question === 'string' && Array.isArray(first.options)) {
           // AI returned quiz format — convert to flashcards
-          const converted: FlashcardItem[] = (raw as QuizItem[]).map(item => ({
+          const converted: FlashcardItem[] = (raw as QuizItem[]).map((item) => ({
             q: item.question,
             a: item.options[item.answer] ?? item.options[0] ?? '',
           }));
@@ -1194,7 +1202,8 @@ export function FloatingStudyPilot({
     setStructuredCard(null);
   }
 
-  function handleSubmit() {    const text = question.trim();
+  function handleSubmit() {
+    const text = question.trim();
     if (!text && pendingScreenshots.length === 0) return;
     setQuestion('');
     void runStudyAction('explain', text || 'What can you tell me about this screenshot?');
@@ -1208,17 +1217,15 @@ export function FloatingStudyPilot({
     if (isSavingSession) return;
     const questionText = options.questionText ?? (lastQuestion || card.title);
     const answerText = options.answerText ?? card.body;
-    const transcriptSnapshot = options.transcriptSnapshot ?? (transcript.length > 0
-      ? transcript
-      : fallbackTranscript(questionText, answerText));
+    const transcriptSnapshot =
+      options.transcriptSnapshot ?? (transcript.length > 0 ? transcript : fallbackTranscript(questionText, answerText));
     const session = createStudySession({
       page,
       folder: context.folder,
       question: questionText,
       answer: answerText,
       transcript: transcriptSnapshot,
-      screenshotDataUrl:
-        options.screenshotDataUrl ?? undefined,
+      screenshotDataUrl: options.screenshotDataUrl ?? undefined,
       tags: ['study-session', context.folder.toLowerCase().replace(/\s+/g, '-')],
     });
 
@@ -1284,7 +1291,7 @@ export function FloatingStudyPilot({
       });
       if (!panelMounted.current) return;
       if (snapshot?.dataUrl) {
-        setPendingScreenshots(prev => [...prev, snapshot.dataUrl]);
+        setPendingScreenshots((prev) => [...prev, snapshot.dataUrl]);
         flashNotice('Screenshot attached', 2200);
       }
     } catch {
@@ -1293,21 +1300,21 @@ export function FloatingStudyPilot({
   }
 
   function removePendingScreenshot(index: number) {
-    setPendingScreenshots(prev => prev.filter((_, i) => i !== index));
+    setPendingScreenshots((prev) => prev.filter((_, i) => i !== index));
   }
 
   /** Convert image Files/Blobs to JPEG data URLs (max 1024px) and add to pending list. */
   async function addImageFiles(files: File[] | DataTransferItemList | FileList) {
     const fileArray = Array.from(files as Iterable<File | DataTransferItem>)
-      .map(item => ('getAsFile' in item ? item.getAsFile() : item as File))
+      .map((item) => ('getAsFile' in item ? item.getAsFile() : (item as File)))
       .filter((f): f is File => f !== null && f.type.startsWith('image/'));
 
     if (fileArray.length === 0) return;
 
     const dataUrls = await Promise.all(
       fileArray.map(
-        file =>
-          new Promise<string | null>(resolve => {
+        (file) =>
+          new Promise<string | null>((resolve) => {
             const reader = new FileReader();
             reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
             reader.onerror = () => resolve(null);
@@ -1320,7 +1327,7 @@ export function FloatingStudyPilot({
 
     const valid = dataUrls.filter((u): u is string => u !== null);
     if (valid.length > 0) {
-      setPendingScreenshots(prev => [...prev, ...valid]);
+      setPendingScreenshots((prev) => [...prev, ...valid]);
       flashNotice(valid.length === 1 ? 'Image attached' : `${valid.length} images attached`, 2000);
     }
   }
@@ -1330,7 +1337,7 @@ export function FloatingStudyPilot({
     const items = event.clipboardData?.items;
     if (!items) return;
 
-    const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith('image/'));
     if (imageItems.length === 0) return;
 
     // Prevent the default only when there are images so text paste still works.
@@ -1394,12 +1401,15 @@ export function FloatingStudyPilot({
   // Hidden file input for the "pick from file explorer" flow
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => () => {
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-    cancelScheduledTimeout(noticeTimer.current);
-    cancelScheduledTimeout(copiedTimer.current);
-    cancelScheduledTimeout(confettiHideTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      cancelScheduledTimeout(noticeTimer.current);
+      cancelScheduledTimeout(copiedTimer.current);
+      cancelScheduledTimeout(confettiHideTimer.current);
+    },
+    [],
+  );
 
   return (
     <>
@@ -1408,11 +1418,7 @@ export function FloatingStudyPilot({
         style={dragPos ? { left: dragPos.x, top: dragPos.y, right: 'auto', bottom: 'auto' } : undefined}
       >
         {/* Confetti canvas overlay */}
-        {showConfetti && (
-          <canvas
-            ref={confettiRef}
-          />
-        )}
+        {showConfetti && <canvas ref={confettiRef} />}
         <AnimatePresence>
           {!isOpen ? (
             <motion.button
@@ -1421,7 +1427,9 @@ export function FloatingStudyPilot({
               className="sp-launcher"
               aria-label="Open Study Pilot"
               title={`Study Pilot — ask about ${sourceLabel}`}
-              onClick={() => { if (!launcherDidDrag.current) setIsOpen(true); }}
+              onClick={() => {
+                if (!launcherDidDrag.current) setIsOpen(true);
+              }}
               onPointerDown={onLauncherPointerDown}
               onPointerMove={onLauncherPointerMove}
               onPointerUp={onLauncherPointerUp}
@@ -1455,124 +1463,120 @@ export function FloatingStudyPilot({
               onHeaderPointerMove={onHeaderPointerMove}
               onHeaderPointerUp={onHeaderPointerUp}
               onMinimize={() => setIsOpen(false)}
-              onTogglePinned={() => setIsPinned(value => !value)}
-              onToggleMenu={() => setMenuOpen(value => !value)}
+              onTogglePinned={() => setIsPinned((value) => !value)}
+              onToggleMenu={() => setMenuOpen((value) => !value)}
               onCapture={() => void captureAndAttach()}
               onSave={() => void saveToDashboard()}
               onOpenDashboard={() => void openDashboard()}
-              onPersonalityChange={value => {
+              onPersonalityChange={(value) => {
                 setPersonality(value);
                 if (typeof chrome !== 'undefined' && chrome.storage) {
                   chrome.storage.local.set({ personality: value }).catch(() => {});
                 }
               }}
             >
+              <PanelBody
+                authConnected={authState?.connected !== false}
+                activeChatId={activeChatId}
+                activeChat={activeChat}
+                chatMessages={chatMessages}
+                sharedContext={sharedContext}
+                isCreatingChat={isCreatingChat}
+                isRefreshingChats={isRefreshingChats}
+                liveFrozen={liveFrozen}
+                liveBusy={liveBusy}
+                studyMode={studyMode}
+                studyLoading={studyLoading}
+                studyError={studyError}
+                structuredCard={structuredCard}
+                page={page}
+                context={context}
+                card={card}
+                cardOpen={cardOpen}
+                cardScreenshotDataUrl={cardScreenshotDataUrl}
+                copied={copied}
+                feedback={feedback}
+                thinking={phase === 'thinking'}
+                orbState={orbState}
+                statusText={statusText}
+                micOn={micOn}
+                isSpeaking={isSpeaking}
+                liveState={liveState}
+                settingsOpen={settingsOpen}
+                pendingScreenshots={pendingScreenshots}
+                fileInputRef={fileInputRef}
+                question={question}
+                pomodoroRemaining={pomodoroRemaining}
+                pomodoroStats={pomodoroStats}
+                pomodoroPickerOpen={pomodoroPickerOpen}
+                onSelectChat={(chatId) => void selectDashboardChat(chatId)}
+                onCreateChat={() => {
+                  void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
+                }}
+                onRefreshChats={() => void refreshSharedChatContext(activeChatIdRef.current)}
+                onOpenDashboard={() => void openDashboard()}
+                onCloseStudyMode={closeStudyMode}
+                onRegenerateStudyMode={(mode) => {
+                  void openStudyMode(mode);
+                }}
+                onPerfectScore={fireConfetti}
+                onToggleMic={toggleMic}
+                onSpeak={speakAnswer}
+                onTogglePause={togglePause}
+                onToggleSettings={() => setSettingsOpen((value) => !value)}
+                onChangeContext={setContext}
+                onPaste={handleComposerPaste}
+                onRemoveScreenshot={removePendingScreenshot}
+                onOpenFilePicker={openFilePicker}
+                onFileInputChange={handleFileInputChange}
+                onQuestionChange={setQuestion}
+                onSubmit={handleSubmit}
+                formatTime={formatTime}
+                onRunStudyAction={(action) => void runStudyAction(action)}
+                onOpenStudyMode={(mode) => void openStudyMode(mode)}
+                onContinueSession={(session) => void continueDashboardSession(session)}
+                onStopPomodoro={stopPomodoro}
+                onTogglePomodoroPicker={() => setPomodoroPickerOpen((value) => !value)}
+                onStartPomodoro={startPomodoro}
+                onToggleCard={() => setCardOpen((value) => !value)}
+                onCopy={copyAnswer}
+                onFeedback={(value) => setFeedback((current) => (current === value ? null : value))}
+              />
 
-            <PanelBody
-              authConnected={authState?.connected !== false}
-              activeChatId={activeChatId}
-              activeChat={activeChat}
-              chatMessages={chatMessages}
-              sharedContext={sharedContext}
-              isCreatingChat={isCreatingChat}
-              isRefreshingChats={isRefreshingChats}
-              liveFrozen={liveFrozen}
-              liveBusy={liveBusy}
-              studyMode={studyMode}
-              studyLoading={studyLoading}
-              studyError={studyError}
-              structuredCard={structuredCard}
-              page={page}
-              context={context}
-              card={card}
-              cardOpen={cardOpen}
-              cardScreenshotDataUrl={cardScreenshotDataUrl}
-              copied={copied}
-              feedback={feedback}
-              thinking={phase === 'thinking'}
-              orbState={orbState}
-              statusText={statusText}
-              micOn={micOn}
-              isSpeaking={isSpeaking}
-              liveState={liveState}
-              settingsOpen={settingsOpen}
-              pendingScreenshots={pendingScreenshots}
-              fileInputRef={fileInputRef}
-              question={question}
-              pomodoroRemaining={pomodoroRemaining}
-              pomodoroStats={pomodoroStats}
-              pomodoroPickerOpen={pomodoroPickerOpen}
-              onSelectChat={chatId => void selectDashboardChat(chatId)}
-              onCreateChat={() => {
-                void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
-              }}
-              onRefreshChats={() => void refreshSharedChatContext(activeChatIdRef.current)}
-              onOpenDashboard={() => void openDashboard()}
-              onCloseStudyMode={closeStudyMode}
-              onRegenerateStudyMode={mode => { void openStudyMode(mode); }}
-              onPerfectScore={fireConfetti}
-              onToggleMic={toggleMic}
-              onSpeak={speakAnswer}
-              onTogglePause={togglePause}
-              onToggleSettings={() => setSettingsOpen(value => !value)}
-              onChangeContext={setContext}
-              onPaste={handleComposerPaste}
-              onRemoveScreenshot={removePendingScreenshot}
-              onOpenFilePicker={openFilePicker}
-              onFileInputChange={handleFileInputChange}
-              onQuestionChange={setQuestion}
-              onSubmit={handleSubmit}
-              formatTime={formatTime}
-              onRunStudyAction={action => void runStudyAction(action)}
-              onOpenStudyMode={mode => void openStudyMode(mode)}
-              onContinueSession={session => void continueDashboardSession(session)}
-              onStopPomodoro={stopPomodoro}
-              onTogglePomodoroPicker={() => setPomodoroPickerOpen(value => !value)}
-              onStartPomodoro={startPomodoro}
-              onToggleCard={() => setCardOpen(value => !value)}
-              onCopy={copyAnswer}
-              onFeedback={value => setFeedback(current => (current === value ? null : value))}
-            />
+              <footer className="sp-footer">
+                <button type="button" className="sp-pro" onClick={() => void openDashboard()}>
+                  <Crown size={16} />
+                  <span>Pro</span>
+                </button>
+              </footer>
 
-
-            <footer className="sp-footer">
-              <button
-                type="button"
-                className="sp-pro"
-                onClick={() => void openDashboard()}
-              >
-                <Crown size={16} />
-                <span>Pro</span>
-              </button>
-            </footer>
-
-            {/* Resize handle — bottom-right corner */}
-            <div
-              className="sp-resize-handle"
-              aria-hidden="true"
-              onPointerDown={onResizePointerDown}
-              onPointerMove={onResizePointerMove}
-              onPointerUp={onResizePointerUp}
-            />
-          </ExtensionPanel>
-        ) : null}
-      </AnimatePresence>
-    </div>
+              {/* Resize handle — bottom-right corner */}
+              <div
+                className="sp-resize-handle"
+                aria-hidden="true"
+                onPointerDown={onResizePointerDown}
+                onPointerMove={onResizePointerMove}
+                onPointerUp={onResizePointerUp}
+              />
+            </ExtensionPanel>
+          ) : null}
+        </AnimatePresence>
+      </div>
 
       <SelectionTooltip
         panelOpen={isOpen}
         selection={selectionTooltip}
-        onExplain={text => {
+        onExplain={(text) => {
           setIsOpen(true);
           setSelectionTooltip(null);
           void runStudyAction('explain', `Explain this: "${text}"`);
         }}
-        onFlashcard={text => {
+        onFlashcard={(text) => {
           setIsOpen(true);
           setSelectionTooltip(null);
           void openStudyMode('flashcards', text);
         }}
-        onQuiz={text => {
+        onQuiz={(text) => {
           setIsOpen(true);
           setSelectionTooltip(null);
           void openStudyMode('quiz', text);
@@ -1581,4 +1585,3 @@ export function FloatingStudyPilot({
     </>
   );
 }
-

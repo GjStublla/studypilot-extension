@@ -86,10 +86,7 @@ const live: RuntimeLive = {
   reconnectAttempts: 0,
 };
 
-export function isCurrentLiveRuntimeOperation(
-  operationId: number,
-  latestOperationId: number,
-): boolean {
+export function isCurrentLiveRuntimeOperation(operationId: number, latestOperationId: number): boolean {
   return operationId === latestOperationId;
 }
 
@@ -102,9 +99,7 @@ function normalizeInitialTurns(raw: unknown): GeminiContentTurn[] {
   const turns: GeminiContentTurn[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
-    const role = typeof (item as { role?: unknown }).role === 'string'
-      ? (item as { role: string }).role
-      : null;
+    const role = typeof (item as { role?: unknown }).role === 'string' ? (item as { role: string }).role : null;
     const parts = (item as { parts?: unknown }).parts;
     if (!role || !Array.isArray(parts)) continue;
     turns.push({
@@ -120,11 +115,7 @@ async function persistPendingTurns(): Promise<void> {
 }
 
 export async function restoreLivePersisted(): Promise<void> {
-  const data = await chrome.storage.local.get([
-    STORAGE.selection,
-    STORAGE.resumption,
-    STORAGE.pendingTurns,
-  ]);
+  const data = await chrome.storage.local.get([STORAGE.selection, STORAGE.resumption, STORAGE.pendingTurns]);
   const sel = data[STORAGE.selection] as LiveSelection | undefined;
   if (sel) live.selection = sel;
   const handle = data[STORAGE.resumption] as string | undefined;
@@ -182,8 +173,7 @@ async function ensureOffscreen(): Promise<void> {
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_URL,
     reasons: OFFSCREEN_REASONS,
-    justification:
-      'Gemini Live mic capture, PCM playback, and WebSocket session must outlive tab navigation.',
+    justification: 'Gemini Live mic capture, PCM playback, and WebSocket session must outlive tab navigation.',
   });
 
   await new Promise<void>((resolve) => {
@@ -236,8 +226,7 @@ async function flushPendingTurns(): Promise<void> {
   live.pendingTurns = remaining;
   await persistPendingTurns();
   if (droppedPartial) {
-    live.warning =
-      `Dropped ${droppedPartial} unsaved turn(s) with partial transcripts (both sides required).`;
+    live.warning = `Dropped ${droppedPartial} unsaved turn(s) with partial transcripts (both sides required).`;
     await broadcastToPanels(statusMessage());
   }
   if (remaining.length) {
@@ -252,12 +241,7 @@ async function flushPendingTurns(): Promise<void> {
  */
 async function reconnectWithResumption(trigger: 'go_away' | 'closed'): Promise<void> {
   if (live.reconnecting) return;
-  if (
-    live.state === 'idle' ||
-    live.state === 'stopping' ||
-    live.state === 'starting' ||
-    live.state === 'error'
-  ) {
+  if (live.state === 'idle' || live.state === 'stopping' || live.state === 'starting' || live.state === 'error') {
     return;
   }
 
@@ -321,10 +305,7 @@ async function reconnectWithResumption(trigger: 'go_away' | 'closed'): Promise<v
     live.ragReady = Boolean(tokenRes.ragReady);
     await chrome.storage.local.set({ [STORAGE.selection]: live.selection });
 
-    const expiresAt =
-      tokenRes.expireTime ||
-      tokenRes.expiresAt ||
-      new Date(Date.now() + 30 * 60_000).toISOString();
+    const expiresAt = tokenRes.expireTime || tokenRes.expiresAt || new Date(Date.now() + 30 * 60_000).toISOString();
 
     const bootstrap: LiveBootstrap = {
       ephemeralToken: auth.ephemeralToken,
@@ -430,9 +411,7 @@ export async function startLive(opts: {
     // Session resumption reconnects (same Live) skip reseeding; we do not reseed here.
     const seed = true;
     live.resumptionHandle = null;
-    const screenshot = opts.privacy.captureScreenshot
-      ? await captureActiveTabJpeg(opts.windowId)
-      : null;
+    const screenshot = opts.privacy.captureScreenshot ? await captureActiveTabJpeg(opts.windowId) : null;
     if (!isCurrentOperation(operationId)) return statusMessage();
 
     await setState({ state: 'connecting' });
@@ -461,10 +440,7 @@ export async function startLive(opts: {
     await chrome.storage.local.set({ [STORAGE.selection]: live.selection });
     if (!isCurrentOperation(operationId)) return statusMessage();
 
-    const expiresAt =
-      tokenRes.expireTime ||
-      tokenRes.expiresAt ||
-      new Date(Date.now() + 30 * 60_000).toISOString();
+    const expiresAt = tokenRes.expireTime || tokenRes.expiresAt || new Date(Date.now() + 30 * 60_000).toISOString();
 
     const initialTurns = normalizeInitialTurns(tokenRes.initialTurns);
 
@@ -510,16 +486,13 @@ export async function startLive(opts: {
       error: message,
       fallback: 'text-coaching',
       selectionFrozen: false,
-      warning:
-        'Live coaching could not be provisioned. Use text coaching as a fallback.',
+      warning: 'Live coaching could not be provisioned. Use text coaching as a fallback.',
     });
     throw err;
   }
 }
 
-export async function stopLive(
-  reason: 'user_stop' | 'error' | 'go_away' = 'user_stop',
-): Promise<SwToPanelLiveMessage> {
+export async function stopLive(reason: 'user_stop' | 'error' | 'go_away' = 'user_stop'): Promise<SwToPanelLiveMessage> {
   const operationId = ++live.operationId;
   await setState({ state: 'stopping' });
   if (!isCurrentOperation(operationId)) return statusMessage();
@@ -536,9 +509,7 @@ export async function stopLive(
   try {
     if (live.liveSessionId) {
       const durationSeconds =
-        live.startedAtMs != null
-          ? Math.max(0, Math.floor((Date.now() - live.startedAtMs) / 1000))
-          : undefined;
+        live.startedAtMs != null ? Math.max(0, Math.floor((Date.now() - live.startedAtMs) / 1000)) : undefined;
       await finishLiveSession({
         liveSessionId: live.liveSessionId,
         reason,
@@ -548,8 +519,7 @@ export async function stopLive(
       });
     }
   } catch (err) {
-    live.warning =
-      err instanceof Error ? `live-finish failed: ${err.message}` : 'live-finish failed';
+    live.warning = err instanceof Error ? `live-finish failed: ${err.message}` : 'live-finish failed';
   }
 
   if (!isCurrentOperation(operationId)) return statusMessage();
@@ -666,12 +636,7 @@ export async function handleOffscreenLiveMessage(msg: OffscreenToSwMessage): Pro
           fallback: 'text-coaching',
           selectionFrozen: false,
         });
-      } else if (
-        msg.state === 'closed' &&
-        !live.reconnecting &&
-        live.state !== 'idle' &&
-        live.state !== 'stopping'
-      ) {
+      } else if (msg.state === 'closed' && !live.reconnecting && live.state !== 'idle' && live.state !== 'stopping') {
         // Unexpected close mid-session: try resumption before giving up.
         if (live.resumptionHandle && live.liveSessionId && live.selection.chatId) {
           void reconnectWithResumption('closed');
@@ -691,10 +656,7 @@ export async function handleOffscreenLiveMessage(msg: OffscreenToSwMessage): Pro
     case 'LIVE_TURN_FINAL': {
       const savable = canCommitLiveTurn(msg.userText, msg.assistantText);
       const warning =
-        msg.warning ||
-        (!savable
-          ? 'Unsaved turn: both user and assistant transcripts are required.'
-          : undefined);
+        msg.warning || (!savable ? 'Unsaved turn: both user and assistant transcripts are required.' : undefined);
       if (warning) {
         live.warning = warning;
         await broadcastToPanels({ type: 'STUDYPILOT_LIVE_WARNING', message: warning });
@@ -718,9 +680,7 @@ export async function handleOffscreenLiveMessage(msg: OffscreenToSwMessage): Pro
       }
 
       const elapsedSeconds =
-        live.startedAtMs != null
-          ? Math.max(0, Math.floor((Date.now() - live.startedAtMs) / 1000))
-          : 0;
+        live.startedAtMs != null ? Math.max(0, Math.floor((Date.now() - live.startedAtMs) / 1000)) : 0;
       const turn: PendingTurn = {
         liveSessionId: live.liveSessionId,
         requestId: crypto.randomUUID(),
@@ -776,18 +736,12 @@ export async function handleOffscreenLiveMessage(msg: OffscreenToSwMessage): Pro
         error: msg.message,
         fallback: 'text-coaching',
         selectionFrozen: false,
-        warning:
-          'Live coaching could not start. Use text coaching in the panel or dashboard instead.',
+        warning: 'Live coaching could not start. Use text coaching in the panel or dashboard instead.',
       });
       break;
   }
 }
 
 export function isLiveActive(): boolean {
-  return (
-    live.state === 'live' ||
-    live.state === 'connecting' ||
-    live.state === 'starting' ||
-    live.state === 'paused'
-  );
+  return live.state === 'live' || live.state === 'connecting' || live.state === 'starting' || live.state === 'paused';
 }

@@ -58,11 +58,7 @@ export async function queryShadow(page: Page, selector: string): Promise<ShadowQ
   return { session, nodeId: found.nodeId };
 }
 
-export async function waitForShadow(
-  page: Page,
-  selector: string,
-  timeoutMs = 15_000,
-): Promise<ShadowQuery> {
+export async function waitForShadow(page: Page, selector: string, timeoutMs = 15_000): Promise<ShadowQuery> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
@@ -74,9 +70,7 @@ export async function waitForShadow(
     }
     await page.waitForTimeout(150);
   }
-  throw new Error(
-    `Timed out waiting for shadow selector ${selector}${lastError ? `: ${String(lastError)}` : ''}`,
-  );
+  throw new Error(`Timed out waiting for shadow selector ${selector}${lastError ? `: ${String(lastError)}` : ''}`);
 }
 
 export async function clickShadow(page: Page, selector: string): Promise<void> {

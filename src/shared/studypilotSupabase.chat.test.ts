@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildSessionMessages,
-  coachingRequestBody,
-  parseCoachingSseStream,
-} from './studypilotSupabase';
+import { buildSessionMessages, coachingRequestBody, parseCoachingSseStream } from './studypilotSupabase';
 import type { CoachingRequest, StudySession } from './types';
 
 const chatId = 'd43fbabc-5564-45db-a72e-6e373049743e';
@@ -13,7 +9,7 @@ function sseStream(...chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
     start(controller) {
-      chunks.forEach(chunk => controller.enqueue(encoder.encode(chunk)));
+      chunks.forEach((chunk) => controller.enqueue(encoder.encode(chunk)));
       controller.close();
     },
   });

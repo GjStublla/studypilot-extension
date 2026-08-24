@@ -28,18 +28,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const distManifestPath = join(root, 'dist', 'manifest.json');
 
 if (!existsSync(distManifestPath)) {
-  console.error(
-    'validate-manifest: dist/manifest.json is missing. Run npm run build first.',
-  );
+  console.error('validate-manifest: dist/manifest.json is missing. Run npm run build first.');
   process.exit(1);
 }
 
 const manifest = JSON.parse(readFileSync(distManifestPath, 'utf8'));
 const codeExtensions = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.html']);
-const searchFiles = [
-  ...walkFiles(join(root, 'dist')),
-  ...walkFiles(join(root, 'src')),
-].filter((file) => codeExtensions.has(extname(file)));
+const searchFiles = [...walkFiles(join(root, 'dist')), ...walkFiles(join(root, 'src'))].filter((file) =>
+  codeExtensions.has(extname(file)),
+);
 const runtimeTexts = searchFiles.map((file) => readFileSync(file, 'utf8'));
 const errors = evaluateManifest(manifest, runtimeTexts);
 

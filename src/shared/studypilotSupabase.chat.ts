@@ -79,17 +79,13 @@ export async function requestLiveToken(sessionId?: string): Promise<LiveTokenRes
   if (data?.mode === 'text_fallback') {
     return {
       status: 'fallback',
-      message: typeof data.reason === 'string'
-        ? data.reason
-        : 'Live coaching is unavailable; use text coaching.',
+      message: typeof data.reason === 'string' ? data.reason : 'Live coaching is unavailable; use text coaching.',
     };
   }
   if (data?.mode === 'proxy_required') {
     return {
       status: 'proxy_required',
-      message: typeof data.reason === 'string'
-        ? data.reason
-        : 'Live coaching requires a backend WebSocket proxy.',
+      message: typeof data.reason === 'string' ? data.reason : 'Live coaching requires a backend WebSocket proxy.',
     };
   }
   if (typeof data?.accessToken === 'string' && typeof data?.webSocketUrl === 'string') {
@@ -104,7 +100,8 @@ export async function requestLiveToken(sessionId?: string): Promise<LiveTokenRes
     return {
       status: 'stub',
       expiresAt: typeof data.expiresAt === 'string' ? data.expiresAt : undefined,
-      message: 'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
+      message:
+        'The live-token function returned a stub token. Text coaching is available; live audio awaits the real token endpoint.',
     };
   }
 
@@ -113,15 +110,10 @@ export async function requestLiveToken(sessionId?: string): Promise<LiveTokenRes
 
 export async function getSharedChatContext(): Promise<SharedChatContext> {
   const auth = await ensureAuthenticatedSession();
-  const [chats, sessions] = await Promise.all([
-    listDashboardChats(),
-    listDashboardSessions(),
-  ]);
+  const [chats, sessions] = await Promise.all([listDashboardChats(), listDashboardSessions()]);
   const storageKey = activeChatStorageKey(auth.userId);
   const storedChatId = await storageGet<string>(storageKey);
-  const activeChatId = storedChatId && chats.some(chat => chat.id === storedChatId)
-    ? storedChatId
-    : null;
+  const activeChatId = storedChatId && chats.some((chat) => chat.id === storedChatId) ? storedChatId : null;
 
   if (storedChatId && !activeChatId) await storageRemove(storageKey);
 
@@ -133,9 +125,7 @@ export async function getSharedChatContext(): Promise<SharedChatContext> {
   };
 }
 
-export async function getDashboardChatMessages(
-  chatId: string,
-): Promise<DashboardChatMessage[]> {
+export async function getDashboardChatMessages(chatId: string): Promise<DashboardChatMessage[]> {
   const params = new URLSearchParams({
     select: 'id,chat_id,session_id,role,text,server_sequence,request_id,origin_surface,created_at',
     chat_id: `eq.${chatId}`,
@@ -174,10 +164,7 @@ export async function createDashboardChat(
   return chat;
 }
 
-export async function getOrCreateSessionChat(
-  sessionId: string,
-  title: string,
-): Promise<DashboardChatSummary> {
+export async function getOrCreateSessionChat(sessionId: string, title: string): Promise<DashboardChatSummary> {
   const response = await restFetch('rpc/get_or_create_session_chat', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
@@ -217,7 +204,7 @@ async function listDashboardChats(): Promise<DashboardChatSummary[]> {
 }
 
 async function attachRubricMeta(chats: DashboardChatSummary[]): Promise<DashboardChatSummary[]> {
-  const rubricIds = [...new Set(chats.map(c => c.rubricId).filter((id): id is string => Boolean(id)))];
+  const rubricIds = [...new Set(chats.map((c) => c.rubricId).filter((id): id is string => Boolean(id)))];
   if (rubricIds.length === 0) return chats;
 
   const params = new URLSearchParams({
@@ -231,12 +218,10 @@ async function attachRubricMeta(chats: DashboardChatSummary[]): Promise<Dashboar
 
   const rows = await parseJsonResponse<RubricRow[]>(response);
   const byId = new Map(
-    rows
-      .filter((row): row is RubricRow & { id: string } => typeof row.id === 'string')
-      .map(row => [row.id, row]),
+    rows.filter((row): row is RubricRow & { id: string } => typeof row.id === 'string').map((row) => [row.id, row]),
   );
 
-  return chats.map(chat => {
+  return chats.map((chat) => {
     if (!chat.rubricId) return chat;
     const rubric = byId.get(chat.rubricId);
     if (!rubric) return chat;
@@ -263,9 +248,7 @@ async function listDashboardSessions(): Promise<DashboardSessionSummary[]> {
   return (await parseJsonResponse<DashboardSessionRow[]>(response)).map(mapDashboardSession);
 }
 
-export async function requestCoaching(
-  request: CoachingRequest,
-): Promise<CoachingResponse> {
+export async function requestCoaching(request: CoachingRequest): Promise<CoachingResponse> {
   const response = await edgeFetch('socratic-coach', coachingRequestBody(request));
 
   if (!response.ok) throw await responseError(response);
@@ -375,14 +358,11 @@ export async function syncStudySessionToSupabase(
 
   if (chat.sessionId) {
     if (screenshotPath) {
-      const screenshotResponse = await restFetch(
-        `sessions?id=eq.${encodeURIComponent(remoteSessionId)}&select=id`,
-        {
-          method: 'PATCH',
-          headers: { Prefer: 'return=representation' },
-          body: JSON.stringify({ screenshot_path: screenshotPath }),
-        },
-      );
+      const screenshotResponse = await restFetch(`sessions?id=eq.${encodeURIComponent(remoteSessionId)}&select=id`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ screenshot_path: screenshotPath }),
+      });
       if (!screenshotResponse.ok) throw await responseError(screenshotResponse);
 
       const savedSession = await parseJsonResponse<Array<{ id?: string }>>(screenshotResponse);
@@ -423,14 +403,11 @@ export async function syncStudySessionToSupabase(
   }
 
   if (!chat.sessionId) {
-    const linkResponse = await restFetch(
-      'rpc/link_dashboard_chat_session',
-      {
-        method: 'POST',
-        headers: { Prefer: 'return=representation' },
-        body: JSON.stringify({ p_chat_id: chat.id }),
-      },
-    );
+    const linkResponse = await restFetch('rpc/link_dashboard_chat_session', {
+      method: 'POST',
+      headers: { Prefer: 'return=representation' },
+      body: JSON.stringify({ p_chat_id: chat.id }),
+    });
     if (!linkResponse.ok) throw await responseError(linkResponse);
     const linkedRaw = await parseJsonResponse<DashboardChatRow | DashboardChatRow[]>(linkResponse);
     const linkedChat = Array.isArray(linkedRaw) ? linkedRaw[0] : linkedRaw;
@@ -454,7 +431,7 @@ export async function syncStudySessionToSupabase(
   }
 
   const summary = finalize
-    ? await summarizeSession(remoteSessionId).catch(error => ({
+    ? await summarizeSession(remoteSessionId).catch((error) => ({
         warning: error instanceof Error ? error.message : 'Session summary failed.',
       }))
     : {};
@@ -527,10 +504,10 @@ function modeForFolder(folder: StudyFolder): StudyPilotSessionMode {
 
 export function buildSessionMessages(remoteSessionId: string, session: StudySession) {
   const transcript = (session.transcript ?? [])
-    .filter(turn => turn.text.trim().length > 0)
+    .filter((turn) => turn.text.trim().length > 0)
     .sort((a, b) => a.atSeconds - b.atSeconds);
 
-  return transcript.map(turn => ({
+  return transcript.map((turn) => ({
     id: turn.id,
     session_id: remoteSessionId,
     role: turn.role,
@@ -541,28 +518,21 @@ export function buildSessionMessages(remoteSessionId: string, session: StudySess
 
 function durationFromTranscript(transcript?: StudySession['transcript']): number {
   if (!transcript || transcript.length === 0) return 0;
-  return Math.max(...transcript.map(turn => Math.max(0, Math.round(turn.atSeconds))));
+  return Math.max(...transcript.map((turn) => Math.max(0, Math.round(turn.atSeconds))));
 }
 
-async function uploadSessionCapture(
-  auth: AuthenticatedSession,
-  sessionId: string,
-  dataUrl: string,
-): Promise<string> {
+async function uploadSessionCapture(auth: AuthenticatedSession, sessionId: string, dataUrl: string): Promise<string> {
   const image = parseImageDataUrl(dataUrl);
   const path = `${auth.userId}/${sessionId}/capture.jpg`;
   const headers = authHeaders(auth);
   headers.set('Content-Type', image.mimeType);
   headers.set('x-upsert', 'true');
 
-  const response = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/session-captures/${encodeStoragePath(path)}`,
-    {
-      method: 'POST',
-      headers,
-      body: base64ToBlob(image.data, image.mimeType),
-    },
-  );
+  const response = await fetch(`${SUPABASE_URL}/storage/v1/object/session-captures/${encodeStoragePath(path)}`, {
+    method: 'POST',
+    headers,
+    body: base64ToBlob(image.data, image.mimeType),
+  });
 
   if (!response.ok) throw await responseError(response);
   return path;
@@ -591,25 +561,24 @@ function encodeStoragePath(path: string): string {
   return path.split('/').map(encodeURIComponent).join('/');
 }
 
-function hasStringProperty<K extends string>(
-  value: unknown,
-  key: K,
-): value is Record<K, string> {
-  return typeof value === 'object'
-    && value !== null
-    && key in value
-    && typeof (value as Record<K, unknown>)[key] === 'string';
+function hasStringProperty<K extends string>(value: unknown, key: K): value is Record<K, string> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    key in value &&
+    typeof (value as Record<K, unknown>)[key] === 'string'
+  );
 }
 
 function isCoachingCommit(value: unknown): value is CoachingCommit & { type: 'commit' } {
   if (!isObject(value) || value.type !== 'commit') return false;
   return (
-    typeof value.chatId === 'string'
-    && typeof value.requestId === 'string'
-    && typeof value.userMessageId === 'string'
-    && typeof value.assistantMessageId === 'string'
-    && typeof value.userSequence === 'number'
-    && typeof value.assistantSequence === 'number'
+    typeof value.chatId === 'string' &&
+    typeof value.requestId === 'string' &&
+    typeof value.userMessageId === 'string' &&
+    typeof value.assistantMessageId === 'string' &&
+    typeof value.userSequence === 'number' &&
+    typeof value.assistantSequence === 'number'
   );
 }
 
@@ -638,10 +607,7 @@ function mapDashboardSession(row: DashboardSessionRow): DashboardSessionSummary 
   };
 }
 
-function mapDashboardChatMessage(
-  row: DashboardChatMessageRow,
-  fallbackSequence: number,
-): DashboardChatMessage {
+function mapDashboardChatMessage(row: DashboardChatMessageRow, fallbackSequence: number): DashboardChatMessage {
   if (!row.id || !row.chat_id || !row.role || typeof row.text !== 'string') {
     throw new Error('StudyPilot returned an invalid dashboard chat message.');
   }
@@ -669,9 +635,7 @@ function activeChatStorageKey(userId: string): string {
 
 export function dashboardChatUrl(chatId: string | null): string {
   const base = DASHBOARD_URL.split('#')[0];
-  return chatId
-    ? `${base}#dashboard?chat=${encodeURIComponent(chatId)}`
-    : `${base}#dashboard`;
+  return chatId ? `${base}#dashboard?chat=${encodeURIComponent(chatId)}` : `${base}#dashboard`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

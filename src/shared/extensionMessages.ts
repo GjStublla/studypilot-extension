@@ -43,9 +43,7 @@ export type StudyPilotRuntimeMessage =
   | { type: 'STUDYPILOT_OPEN_MODAL' }
   | { type: 'STUDYPILOT_TOGGLE_MODAL' };
 
-export type StudyPilotResponse<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: string };
+export type StudyPilotResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export type PageContextResponse = StudyPilotResponse<PageContext>;
 export type AuthStatusResponse = StudyPilotResponse<ExtensionAuthState>;
@@ -55,8 +53,7 @@ export type ChatMessagesResponse = StudyPilotResponse<DashboardChatMessage[]>;
 export type ChatResponse = StudyPilotResponse<DashboardChatSummary>;
 export type SessionResponse = StudyPilotResponse<DashboardSessionSummary>;
 export type LiveStatusResponse = StudyPilotResponse<LiveSessionStatus>;
-export type CaptureVisibleTabResponse =
-  StudyPilotResponse<CaptureVisibleTabResult>;
+export type CaptureVisibleTabResponse = StudyPilotResponse<CaptureVisibleTabResult>;
 export type SaveSessionResponse = StudyPilotResponse<DashboardSaveResult>;
 export type OpenDashboardResponse = StudyPilotResponse<{ opened: true }>;
 
@@ -72,9 +69,7 @@ export function parseLiveStartPayload(payload: unknown): {
     throw new Error('Live start requires a chatId.');
   }
   if (!isSessionPrivacyOptions(record.privacy)) {
-    throw new Error(
-      'Live start requires privacy.captureScreenshot and privacy.saveToDashboard as booleans.',
-    );
+    throw new Error('Live start requires privacy.captureScreenshot and privacy.saveToDashboard as booleans.');
   }
   return {
     chatId: record.chatId,
@@ -85,9 +80,7 @@ export function parseLiveStartPayload(payload: unknown): {
   };
 }
 
-export function isStudyPilotRuntimeMessage(
-  message: unknown,
-): message is StudyPilotRuntimeMessage {
+export function isStudyPilotRuntimeMessage(message: unknown): message is StudyPilotRuntimeMessage {
   return (
     typeof message === 'object' &&
     message !== null &&
@@ -97,19 +90,15 @@ export function isStudyPilotRuntimeMessage(
   );
 }
 
-export function isLiveFanoutMessage(
-  message: unknown,
-): message is SwToPanelLiveMessage {
+export function isLiveFanoutMessage(message: unknown): message is SwToPanelLiveMessage {
   return (
     typeof message === 'object' &&
     message !== null &&
     'type' in message &&
     typeof (message as { type?: unknown }).type === 'string' &&
-    (
-      (message as { type: string }).type === 'STUDYPILOT_LIVE_STATUS' ||
+    ((message as { type: string }).type === 'STUDYPILOT_LIVE_STATUS' ||
       (message as { type: string }).type === 'STUDYPILOT_LIVE_TRANSCRIPT' ||
-      (message as { type: string }).type === 'STUDYPILOT_LIVE_WARNING'
-    )
+      (message as { type: string }).type === 'STUDYPILOT_LIVE_WARNING')
   );
 }
 

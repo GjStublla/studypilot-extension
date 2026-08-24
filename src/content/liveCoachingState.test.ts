@@ -11,10 +11,7 @@ import {
 } from './liveCoachingState';
 import { isCurrentLiveOperation } from './useLiveCoaching';
 
-const status = (
-  state: LiveSessionStatus['state'],
-  overrides: Partial<LiveSessionStatus> = {},
-): LiveSessionStatus => ({
+const status = (state: LiveSessionStatus['state'], overrides: Partial<LiveSessionStatus> = {}): LiveSessionStatus => ({
   state,
   selectionFrozen: false,
   ...overrides,
@@ -101,11 +98,13 @@ describe('live coaching state derivation', () => {
 
 describe('live coaching operation boundary', () => {
   it('accepts only the mounted latest operation', () => {
-    expect(isCurrentLiveOperation({
-      mounted: true,
-      operationSequence: 4,
-      latestSequence: 4,
-    })).toBe(true);
+    expect(
+      isCurrentLiveOperation({
+        mounted: true,
+        operationSequence: 4,
+        latestSequence: 4,
+      }),
+    ).toBe(true);
   });
 
   it('rejects stale and unmounted responses', () => {

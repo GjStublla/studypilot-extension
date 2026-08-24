@@ -20,19 +20,11 @@ export default defineConfig(({ mode }) => {
   const localBuild = mode === 'studypilot-local' || mode === 'studypilot-e2e';
   const env = loadEnv(mode, process.cwd(), 'VITE_');
 
-  if (
-    localBuild &&
-    (!isLoopbackUrl(env.VITE_SUPABASE_URL) || !isLoopbackUrl(env.VITE_DASHBOARD_URL))
-  ) {
-    throw new Error(
-      'Local extension builds require loopback VITE_SUPABASE_URL and VITE_DASHBOARD_URL values.',
-    );
+  if (localBuild && (!isLoopbackUrl(env.VITE_SUPABASE_URL) || !isLoopbackUrl(env.VITE_DASHBOARD_URL))) {
+    throw new Error('Local extension builds require loopback VITE_SUPABASE_URL and VITE_DASHBOARD_URL values.');
   }
 
-  if (
-    mode === 'production' &&
-    isLoopbackUrl(env.VITE_SUPABASE_URL)
-  ) {
+  if (mode === 'production' && isLoopbackUrl(env.VITE_SUPABASE_URL)) {
     throw new Error(
       'Production extension builds cannot target a local Supabase instance. Use npm run build:local instead.',
     );
@@ -47,11 +39,7 @@ export default defineConfig(({ mode }) => {
           ...manifest.action,
           default_title: 'Toggle Study Pilot (Local)',
         },
-        host_permissions: [
-          ...manifest.host_permissions,
-          'http://127.0.0.1/*',
-          'http://localhost/*',
-        ],
+        host_permissions: [...manifest.host_permissions, 'http://127.0.0.1/*', 'http://localhost/*'],
       }
     : manifest;
 
@@ -70,12 +58,7 @@ export default defineConfig(({ mode }) => {
     },
     publicDir: 'public',
     test: {
-      exclude: [
-        '**/node_modules/**',
-        '**/dist/**',
-        '**/dist-local/**',
-        '**/e2e/**',
-      ],
+      exclude: ['**/node_modules/**', '**/dist/**', '**/dist-local/**', '**/e2e/**'],
     },
     server: {
       port: 5179,

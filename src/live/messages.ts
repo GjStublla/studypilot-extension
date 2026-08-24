@@ -8,14 +8,7 @@
 
 import type { SessionPrivacyOptions } from '@/shared/types';
 
-export type LiveUiState =
-  | 'idle'
-  | 'starting'
-  | 'connecting'
-  | 'live'
-  | 'paused'
-  | 'stopping'
-  | 'error';
+export type LiveUiState = 'idle' | 'starting' | 'connecting' | 'live' | 'paused' | 'stopping' | 'error';
 
 export type LiveSelection = {
   chatId: string | null;
@@ -58,10 +51,13 @@ export type LiveBootstrap = {
 export type TranscriptRole = 'user' | 'assistant';
 
 export type PanelLiveControlMessage =
-  | { type: 'STUDYPILOT_LIVE_START'; payload: {
-      chatId: string;
-      privacy: SessionPrivacyOptions;
-    } }
+  | {
+      type: 'STUDYPILOT_LIVE_START';
+      payload: {
+        chatId: string;
+        privacy: SessionPrivacyOptions;
+      };
+    }
   | { type: 'STUDYPILOT_LIVE_STOP' }
   | { type: 'STUDYPILOT_LIVE_PAUSE' }
   | { type: 'STUDYPILOT_LIVE_RESUME' }

@@ -1,10 +1,6 @@
 import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import { Camera, Send, X } from 'lucide-react';
-import type {
-  ChangeEvent,
-  ClipboardEvent,
-  RefObject,
-} from 'react';
+import type { ChangeEvent, ClipboardEvent, RefObject } from 'react';
 
 export interface ComposerPanelProps {
   pendingScreenshots: string[];
@@ -70,9 +66,7 @@ export function ComposerPanel({
           data-active={pendingScreenshots.length > 0}
         >
           <Camera size={17} strokeWidth={2} />
-          {pendingScreenshots.length > 0 ? (
-            <span className="sp-camera-badge">{pendingScreenshots.length}</span>
-          ) : null}
+          {pendingScreenshots.length > 0 ? <span className="sp-camera-badge">{pendingScreenshots.length}</span> : null}
         </button>
         <input
           ref={fileInputRef}
@@ -89,8 +83,8 @@ export function ComposerPanel({
           value={question}
           placeholder="Ask a question or paste an image…"
           aria-label="Ask a question"
-          onChange={event => onQuestionChange(event.target.value)}
-          onKeyDown={event => {
+          onChange={(event) => onQuestionChange(event.target.value)}
+          onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
               onSubmit();

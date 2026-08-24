@@ -17,9 +17,7 @@ describe('buildLiveWebSocketUrl', () => {
   });
 
   it('uses vertexWsUrl helper for existing query strings', () => {
-    expect(vertexWsUrl(`${vertexBase}?foo=1`, 'tok')).toBe(
-      `${vertexBase}?foo=1&access_token=tok`,
-    );
+    expect(vertexWsUrl(`${vertexBase}?foo=1`, 'tok')).toBe(`${vertexBase}?foo=1&access_token=tok`);
   });
 
   it('falls back to AI Studio Constrained URL without websocketUrl', () => {

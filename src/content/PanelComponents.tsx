@@ -1,10 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  AlignLeft,
-  HelpCircle,
-  Layers,
-  Lightbulb,
-} from 'lucide-react';
+import { AlignLeft, HelpCircle, Layers, Lightbulb } from 'lucide-react';
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
 
@@ -20,9 +15,7 @@ export interface QuizItem {
 }
 
 export type StructuredCard =
-  | { type: 'flashcards'; items: FlashcardItem[] }
-  | { type: 'quiz'; items: QuizItem[] }
-  | null;
+  { type: 'flashcards'; items: FlashcardItem[] } | { type: 'quiz'; items: QuizItem[] } | null;
 
 export type OrbState = 'listening' | 'muted' | 'paused' | 'thinking';
 
@@ -35,20 +28,27 @@ export function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
 
   function go(delta: number) {
     setDir(delta);
-    setIndex(i => (i + delta + items.length) % items.length);
+    setIndex((i) => (i + delta + items.length) % items.length);
     setSide('q');
   }
 
   function flip() {
     setDir(0);
-    setSide(s => s === 'q' ? 'a' : 'q');
+    setSide((s) => (s === 'q' ? 'a' : 'q'));
   }
 
   // Keyboard: Space/Enter = flip, ArrowLeft/Right = navigate
   function handleKey(e: React.KeyboardEvent) {
-    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
-    else if (e.key === 'ArrowLeft')  { e.preventDefault(); go(-1); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); go(1); }
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      flip();
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      go(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      go(1);
+    }
   }
 
   const card = items[index];
@@ -58,10 +58,11 @@ export function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
 
   return (
     <div className="sp-fc-wrap">
-
       {/* progress + counter */}
       <div className="sp-fc-header">
-        <span className="sp-fc-counter">{index + 1} / {items.length}</span>
+        <span className="sp-fc-counter">
+          {index + 1} / {items.length}
+        </span>
         <span className="sp-fc-pct">{pct}%</span>
       </div>
       <div className="sp-fc-progress">
@@ -97,9 +98,7 @@ export function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
           </motion.p>
         </AnimatePresence>
 
-        <span className="sp-fc-hint">
-          {isAnswer ? 'Space to flip back' : 'Space to reveal · ← → to navigate'}
-        </span>
+        <span className="sp-fc-hint">{isAnswer ? 'Space to flip back' : 'Space to reveal · ← → to navigate'}</span>
       </div>
 
       {/* nav */}
@@ -115,7 +114,12 @@ export function FlashcardViewer({ items }: { items: FlashcardItem[] }) {
               className="sp-fc-dot"
               data-active={i === index}
               aria-label={`Card ${i + 1}`}
-              onClick={e => { e.stopPropagation(); setDir(i > index ? 1 : -1); setIndex(i); setSide('q'); }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDir(i > index ? 1 : -1);
+                setIndex(i);
+                setSide('q');
+              }}
             />
           ))}
         </div>
@@ -142,14 +146,14 @@ export function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPer
   function choose(optIdx: number) {
     if (isAnswered) return;
     setSelected(optIdx);
-    setScores(prev => [...prev, optIdx === q?.answer]);
+    setScores((prev) => [...prev, optIdx === q?.answer]);
   }
 
   function next() {
     if (index + 1 >= items.length) {
       setDone(true);
     } else {
-      setIndex(i => i + 1);
+      setIndex((i) => i + 1);
       setSelected(null);
     }
   }
@@ -167,12 +171,24 @@ export function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPer
     if (pct === 100) onPerfectScore?.();
     return (
       <div className="sp-quiz-result">
-        <span className="sp-quiz-result-score" data-pass={pct >= 60}>{pct}%</span>
-        <p className="sp-quiz-result-label">{correct} / {items.length} correct</p>
-        <p className="sp-quiz-result-msg">
-          {pct === 100 ? 'Perfect score! 🎉' : pct >= 80 ? 'Great work!' : pct >= 60 ? 'Solid effort — review the ones you missed.' : 'Keep studying — you\'ll get there!'}
+        <span className="sp-quiz-result-score" data-pass={pct >= 60}>
+          {pct}%
+        </span>
+        <p className="sp-quiz-result-label">
+          {correct} / {items.length} correct
         </p>
-        <button type="button" className="sp-quiz-retry" onClick={restart}>Try again</button>
+        <p className="sp-quiz-result-msg">
+          {pct === 100
+            ? 'Perfect score! 🎉'
+            : pct >= 80
+              ? 'Great work!'
+              : pct >= 60
+                ? 'Solid effort — review the ones you missed.'
+                : "Keep studying — you'll get there!"}
+        </p>
+        <button type="button" className="sp-quiz-retry" onClick={restart}>
+          Try again
+        </button>
       </div>
     );
   }
@@ -181,7 +197,9 @@ export function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPer
 
   return (
     <div className="sp-quiz-wrap">
-      <p className="sp-quiz-counter">{index + 1} / {items.length}</p>
+      <p className="sp-quiz-counter">
+        {index + 1} / {items.length}
+      </p>
       <p className="sp-quiz-question">{q.question}</p>
       <div className="sp-quiz-options">
         {q.options.map((opt, i) => (
@@ -189,12 +207,7 @@ export function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPer
             key={i}
             type="button"
             className="sp-quiz-option"
-            data-state={
-              !isAnswered ? 'idle'
-              : i === q.answer ? 'correct'
-              : i === selected ? 'wrong'
-              : 'idle'
-            }
+            data-state={!isAnswered ? 'idle' : i === q.answer ? 'correct' : i === selected ? 'wrong' : 'idle'}
             disabled={isAnswered}
             onClick={() => choose(i)}
           >
@@ -205,7 +218,9 @@ export function QuizViewer({ items, onPerfectScore }: { items: QuizItem[]; onPer
       </div>
       {isAnswered ? (
         <div className="sp-quiz-feedback">
-          <span data-correct={isCorrect}>{isCorrect ? '✓ Correct!' : `✗ The answer was ${String.fromCharCode(65 + q.answer)}`}</span>
+          <span data-correct={isCorrect}>
+            {isCorrect ? '✓ Correct!' : `✗ The answer was ${String.fromCharCode(65 + q.answer)}`}
+          </span>
           <button type="button" className="sp-quiz-next" onClick={next}>
             {index + 1 >= items.length ? 'See results' : 'Next →'}
           </button>
@@ -271,15 +286,7 @@ export function RoundButton({
   );
 }
 
-export function MenuItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
+export function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return (
     <button type="button" className="sp-menu-item" role="menuitem" onClick={onClick}>
       {icon}
@@ -288,15 +295,7 @@ export function MenuItem({
   );
 }
 
-export function QuickChip({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+export function QuickChip({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
   return (
     <button type="button" className="sp-chip" onClick={onClick}>
       {children}
@@ -309,23 +308,9 @@ export function SparkleLogo({ size = 28 }: { size?: number }) {
   const gradientId = useId().replace(/[^a-zA-Z0-9]/g, '');
 
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 44 44"
-      fill="none"
-      aria-hidden="true"
-      className="sp-logo"
-    >
+    <svg width={size} height={size} viewBox="0 0 44 44" fill="none" aria-hidden="true" className="sp-logo">
       <defs>
-        <linearGradient
-          id={`sp-spark-${gradientId}`}
-          x1="8"
-          y1="4"
-          x2="38"
-          y2="40"
-          gradientUnits="userSpaceOnUse"
-        >
+        <linearGradient id={`sp-spark-${gradientId}`} x1="8" y1="4" x2="38" y2="40" gradientUnits="userSpaceOnUse">
           <stop stopColor="#8fdcff" />
           <stop offset="0.52" stopColor="#38a1ff" />
           <stop offset="1" stopColor="#2e5bff" />

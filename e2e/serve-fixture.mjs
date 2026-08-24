@@ -66,11 +66,7 @@ const server = http.createServer((request, response) => {
     const pending = [...pendingLiveTokenResponses];
     pendingLiveTokenResponses.clear();
     for (const pendingResponse of pending) {
-      writeJson(
-        pendingResponse,
-        { error: 'e2e delayed live-token released' },
-        503,
-      );
+      writeJson(pendingResponse, { error: 'e2e delayed live-token released' }, 503);
     }
     writeJson(response, { ok: true, released: pending.length });
     return;
@@ -100,7 +96,9 @@ const server = http.createServer((request, response) => {
   if (url.pathname === '/functions/v1/socratic-coach' && request.method === 'POST') {
     let body = '';
     request.setEncoding('utf8');
-    request.on('data', chunk => { body += chunk; });
+    request.on('data', (chunk) => {
+      body += chunk;
+    });
     request.on('end', () => {
       const payload = JSON.parse(body || '{}');
       const requestId = payload.requestId ?? 'e2e-request';
@@ -138,16 +136,19 @@ const server = http.createServer((request, response) => {
         userSequence: 1,
         assistantSequence: 2,
       };
-      writeSse(response, [
-        `data: ${JSON.stringify({ text: 'Grounded response: ' })}`,
-        '',
-        `data: ${JSON.stringify({ text: 'compare the claim with the rubric evidence before revising.' })}`,
-        '',
-        `data: ${JSON.stringify(commit)}`,
-        '',
-        'data: [DONE]',
-        '',
-      ].join('\n'));
+      writeSse(
+        response,
+        [
+          `data: ${JSON.stringify({ text: 'Grounded response: ' })}`,
+          '',
+          `data: ${JSON.stringify({ text: 'compare the claim with the rubric evidence before revising.' })}`,
+          '',
+          `data: ${JSON.stringify(commit)}`,
+          '',
+          'data: [DONE]',
+          '',
+        ].join('\n'),
+      );
     });
     return;
   }

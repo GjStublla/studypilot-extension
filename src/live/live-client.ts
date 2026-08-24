@@ -25,8 +25,7 @@ const API_VERSION = 'v1beta1';
 
 const SEARCH_RUBRIC_DECL = {
   name: 'search_rubric',
-  description:
-    'Search the student rubric / course materials for criteria relevant to the current coaching question.',
+  description: 'Search the student rubric / course materials for criteria relevant to the current coaching question.',
   parameters: {
     type: 'object',
     properties: {
@@ -40,10 +39,7 @@ const SEARCH_RUBRIC_DECL = {
 };
 
 export type LiveClientCallbacks = {
-  onState: (
-    state: 'connecting' | 'live' | 'paused' | 'closing' | 'closed' | 'error',
-    error?: string,
-  ) => void;
+  onState: (state: 'connecting' | 'live' | 'paused' | 'closing' | 'closed' | 'error', error?: string) => void;
   onTranscriptPartial: (role: TranscriptRole, text: string) => void;
   onTurnFinal: (userText: string | null, assistantText: string | null, warning?: string) => void;
   onToolCall: (callId: string, name: string, args: Record<string, unknown>) => void;
@@ -172,8 +168,7 @@ export function buildLiveWebSocketUrl(opts: {
   websocketUrl?: string;
   apiVersion?: string;
 }): string {
-  const useVertex =
-    opts.authMode === 'vertex' || Boolean(opts.websocketUrl);
+  const useVertex = opts.authMode === 'vertex' || Boolean(opts.websocketUrl);
   if (useVertex) {
     if (!opts.websocketUrl?.trim()) {
       throw new Error('Vertex Live requires websocketUrl from live-token');
@@ -181,9 +176,7 @@ export function buildLiveWebSocketUrl(opts: {
     return vertexWsUrl(opts.websocketUrl.trim(), opts.accessToken);
   }
   const apiVersion =
-    typeof opts.apiVersion === 'string' && opts.apiVersion.trim()
-      ? opts.apiVersion.trim()
-      : API_VERSION;
+    typeof opts.apiVersion === 'string' && opts.apiVersion.trim() ? opts.apiVersion.trim() : API_VERSION;
   return constrainedWsUrl(apiVersion, opts.accessToken);
 }
 
@@ -223,8 +216,7 @@ export class LiveClient {
     this.callbacks = opts.callbacks;
     this.callbacks.onState('connecting');
 
-    const token =
-      (opts.bootstrap.accessToken || opts.bootstrap.ephemeralToken || '').trim();
+    const token = (opts.bootstrap.accessToken || opts.bootstrap.ephemeralToken || '').trim();
     if (!token) {
       throw new Error('Live bootstrap missing accessToken');
     }
@@ -247,9 +239,7 @@ export class LiveClient {
       },
       inputAudioTranscription: {},
       outputAudioTranscription: {},
-      sessionResumption: opts.bootstrap.resumptionHandle
-        ? { handle: opts.bootstrap.resumptionHandle }
-        : {},
+      sessionResumption: opts.bootstrap.resumptionHandle ? { handle: opts.bootstrap.resumptionHandle } : {},
       contextWindowCompression: {
         slidingWindow: {},
       },
@@ -327,20 +317,14 @@ export class LiveClient {
 
     // Startup order after connect: client history → video screenshot → mic.
     if (opts.seedHistoryAndScreenshot && this.pendingSeed) {
-      await this.seedInitialContent(
-        this.pendingSeed.turns,
-        this.pendingSeed.screenshotJpegBase64,
-      );
+      await this.seedInitialContent(this.pendingSeed.turns, this.pendingSeed.screenshotJpegBase64);
       this.pendingSeed = null;
     }
 
     await this.startMic();
   }
 
-  private async seedInitialContent(
-    turns: GeminiContentTurn[],
-    screenshotJpegBase64?: string | null,
-  ): Promise<void> {
+  private async seedInitialContent(turns: GeminiContentTurn[], screenshotJpegBase64?: string | null): Promise<void> {
     if (!this.ws || this.seeded) return;
     this.seeded = true;
 
@@ -425,8 +409,7 @@ export class LiveClient {
     }
 
     const toolCall = msg.toolCall as
-      | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
-      | undefined;
+      { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> } | undefined;
     if (toolCall?.functionCalls) {
       for (const fc of toolCall.functionCalls) {
         const id = fc.id ?? crypto.randomUUID();
@@ -448,9 +431,7 @@ export class LiveClient {
     }
   }
 
-  sendToolResponse(
-    functionResponses: Array<{ id: string; name: string; response: Record<string, unknown> }>,
-  ): void {
+  sendToolResponse(functionResponses: Array<{ id: string; name: string; response: Record<string, unknown> }>): void {
     this.sendJson({
       toolResponse: {
         functionResponses: functionResponses.map((fr) => ({

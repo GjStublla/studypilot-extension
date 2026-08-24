@@ -1,9 +1,4 @@
-import type {
-  PageContext,
-  StudyFolder,
-  StudySession,
-  StudyTranscriptTurn,
-} from '@/shared/types';
+import type { PageContext, StudyFolder, StudySession, StudyTranscriptTurn } from '@/shared/types';
 
 export interface StudySessionInput {
   page: PageContext;
@@ -18,9 +13,7 @@ export interface StudySessionInput {
 
 export function createStudySession(input: StudySessionInput): StudySession {
   const durationSeconds =
-    input.transcript && input.transcript.length > 0
-      ? Math.max(...input.transcript.map(turn => turn.atSeconds))
-      : 0;
+    input.transcript && input.transcript.length > 0 ? Math.max(...input.transcript.map((turn) => turn.atSeconds)) : 0;
 
   return {
     id: crypto.randomUUID?.() ?? `study_${Date.now().toString(36)}`,
@@ -46,5 +39,5 @@ export function fallbackTranscript(question: string, answer: string): StudyTrans
     { id: crypto.randomUUID(), sequence: 1, role: 'ai', text: answer, atSeconds: 1 },
   ];
 
-  return turns.filter(turn => turn.text.trim().length > 0);
+  return turns.filter((turn) => turn.text.trim().length > 0);
 }

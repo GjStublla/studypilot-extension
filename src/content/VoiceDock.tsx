@@ -54,16 +54,13 @@ export function VoiceDock({
         label={pauseControl.label}
         onClick={onTogglePause}
       >
-        {pauseControl.paused
-          ? <CirclePlay size={20} strokeWidth={1.75} />
-          : <CirclePause size={20} strokeWidth={1.75} />}
+        {pauseControl.paused ? (
+          <CirclePlay size={20} strokeWidth={1.75} />
+        ) : (
+          <CirclePause size={20} strokeWidth={1.75} />
+        )}
       </RoundButton>
-      <RoundButton
-        active={settingsOpen}
-        tinted
-        label="Session settings"
-        onClick={onToggleSettings}
-      >
+      <RoundButton active={settingsOpen} tinted label="Session settings" onClick={onToggleSettings}>
         <SlidersHorizontal size={20} strokeWidth={1.75} />
       </RoundButton>
     </motion.div>

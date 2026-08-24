@@ -35,11 +35,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "fonts/*.woff2",
-        "audio-worklet.js",
-        "src/offscreen.html"
-      ],
+      "resources": ["fonts/*.woff2", "audio-worklet.js", "src/offscreen.html"],
       "matches": ["http://*/*", "https://*/*"]
     }
   ],

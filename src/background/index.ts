@@ -1,10 +1,7 @@
 /// <reference types="chrome" />
 
 import { DASHBOARD_URL } from '@/shared/config';
-import {
-  isStudyPilotRuntimeMessage,
-  parseLiveStartPayload,
-} from '@/shared/extensionMessages';
+import { isStudyPilotRuntimeMessage, parseLiveStartPayload } from '@/shared/extensionMessages';
 import {
   clearExtensionSession,
   createDashboardChat,
@@ -18,12 +15,7 @@ import {
   storeExtensionSession,
   syncStudySessionToSupabase,
 } from '@/shared/studypilotSupabase';
-import type {
-  CaptureVisibleTabResult,
-  CoachingRequest,
-  LiveSessionStatus,
-  PageContext,
-} from '@/shared/types';
+import type { CaptureVisibleTabResult, CoachingRequest, LiveSessionStatus, PageContext } from '@/shared/types';
 import {
   getLiveStatusMessage,
   handleOffscreenLiveMessage,
@@ -40,10 +32,7 @@ const CAPTURE_MAX_EDGE = 1024;
 const CAPTURE_JPEG_QUALITY = 0.72;
 
 /** Resolve a message handler promise into a sendResponse call. */
-function respond<T>(
-  promise: Promise<T>,
-  sendResponse: (r: unknown) => void,
-): void {
+function respond<T>(promise: Promise<T>, sendResponse: (r: unknown) => void): void {
   promise
     .then((data: T) => sendResponse({ ok: true, data }))
     .catch((error: unknown) =>
@@ -65,13 +54,11 @@ chrome.runtime.onStartup.addListener(() => {
 void restoreLivePersisted();
 
 // The toolbar icon is the single entry point: it toggles the on-page panel.
-chrome.action.onClicked.addListener(tab => {
+chrome.action.onClicked.addListener((tab) => {
   if (tab.id === undefined) return;
   const tabId = tab.id;
 
-  chrome.tabs
-    .sendMessage(tabId, { type: 'STUDYPILOT_TOGGLE_MODAL' })
-    .catch(() => flashRefreshHint(tabId));
+  chrome.tabs.sendMessage(tabId, { type: 'STUDYPILOT_TOGGLE_MODAL' }).catch(() => flashRefreshHint(tabId));
 });
 
 async function flashRefreshHint(tabId: number): Promise<void> {
@@ -107,192 +94,174 @@ function toLiveSessionStatus(): LiveSessionStatus {
   };
 }
 
-chrome.runtime.onMessage.addListener(
-  (
-    message: unknown,
-    sender: chrome.runtime.MessageSender,
-    sendResponse,
-  ) => {
-    if (message && typeof message === 'object' && 'type' in message) {
-      const type = String((message as { type: string }).type);
-      if (isOffscreenMessage(type) || type.startsWith('OFFSCREEN_')) {
-        void handleOffscreenLiveMessage(message as OffscreenToSwMessage)
-          .then(() => sendResponse({ ok: true }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        return true;
-      }
-    }
-
-    if (!isStudyPilotRuntimeMessage(message)) return false;
-
-    switch (message.type) {
-      case 'STUDYPILOT_GET_PAGE_CONTEXT':
-        sendResponse({
-          ok: true,
-          data: getPageContextFromSender(sender),
-        });
-        return false;
-
-      case 'STUDYPILOT_GET_AUTH_STATUS':
-        respond(getAuthStatus(), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_CONNECT_SESSION':
-        respond(storeExtensionSession(message.payload), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_DISCONNECT_SESSION':
-        respond(clearExtensionSession(), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_CAPTURE_VISIBLE_TAB':
-        respond(captureVisibleTab(sender), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_GET_SHARED_CONTEXT':
-        respond(getSharedChatContext(), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_GET_CHAT_MESSAGES':
-        respond(getDashboardChatMessages(message.payload.chatId), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_CREATE_CHAT':
-        respond(
-          createDashboardChat(message.payload.title, message.payload.sessionId ?? null),
-          sendResponse,
-        );
-        return true;
-
-      case 'STUDYPILOT_CONTINUE_SESSION':
-        respond(
-          getOrCreateSessionChat(message.payload.sessionId, message.payload.title),
-          sendResponse,
-        );
-        return true;
-
-      case 'STUDYPILOT_SELECT_CHAT':
-        respond(
-          setActiveDashboardChat(message.payload.chatId).then(() => ({ selected: true as const })),
-          sendResponse,
-        );
-        return true;
-
-      case 'STUDYPILOT_REQUEST_COACHING':
-        respond(
-          prepareCoachingRequest(message.payload, sender).then(async request => ({
-            ...await requestCoaching(request),
-            screenshotDataUrl: request.screenshotDataUrl,
-          })),
-          sendResponse,
-        );
-        return true;
-
-      case 'STUDYPILOT_LIVE_START': {
-        let parsed: ReturnType<typeof parseLiveStartPayload>;
-        try {
-          parsed = parseLiveStartPayload(message.payload);
-        } catch (error) {
+chrome.runtime.onMessage.addListener((message: unknown, sender: chrome.runtime.MessageSender, sendResponse) => {
+  if (message && typeof message === 'object' && 'type' in message) {
+    const type = String((message as { type: string }).type);
+    if (isOffscreenMessage(type) || type.startsWith('OFFSCREEN_')) {
+      void handleOffscreenLiveMessage(message as OffscreenToSwMessage)
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) =>
           sendResponse({
             ok: false,
             error: error instanceof Error ? error.message : String(error),
-          });
-          return false;
-        }
-        const page = getPageContextFromSender(sender);
-        startLive({
-          chatId: parsed.chatId,
-          privacy: parsed.privacy,
-          windowId: sender.tab?.windowId,
-          page: { title: page.sourceTitle, url: page.sourceUrl },
-        })
-          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-              data: toLiveSessionStatus(),
-            }),
-          );
-        return true;
-      }
-
-      case 'STUDYPILOT_LIVE_STOP':
-        stopLive('user_stop')
-          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-              data: toLiveSessionStatus(),
-            }),
-          );
-        return true;
-
-      case 'STUDYPILOT_LIVE_PAUSE':
-        pauseLive()
-          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        return true;
-
-      case 'STUDYPILOT_GET_LIVE_TOKEN':
-        respond(requestLiveToken(message.payload?.sessionId), sendResponse);
-        return true;
-
-      case 'STUDYPILOT_LIVE_RESUME':
-        resumeLive()
-          .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
-          .catch(error =>
-            sendResponse({
-              ok: false,
-              error: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        return true;
-
-      case 'STUDYPILOT_GET_LIVE_STATUS':
-        sendResponse({ ok: true, data: toLiveSessionStatus() });
-        return false;
-
-      case 'STUDYPILOT_SAVE_SESSION':
-        respond(
-          syncStudySessionToSupabase(
-            message.payload.chatId,
-            message.payload.session,
-            message.payload.finalize ?? false,
-          ),
-          sendResponse,
+          }),
         );
-        return true;
-
-      case 'STUDYPILOT_OPEN_DASHBOARD':
-        respond(
-          chrome.tabs
-            .create({ url: message.payload?.url ?? DASHBOARD_URL })
-            .then(() => ({ opened: true as const })),
-          sendResponse,
-        );
-        return true;
-
-      case 'STUDYPILOT_OPEN_MODAL':
-      case 'STUDYPILOT_TOGGLE_MODAL':
-        return false;
-
-      default:
-        return false;
+      return true;
     }
-  },
-);
+  }
+
+  if (!isStudyPilotRuntimeMessage(message)) return false;
+
+  switch (message.type) {
+    case 'STUDYPILOT_GET_PAGE_CONTEXT':
+      sendResponse({
+        ok: true,
+        data: getPageContextFromSender(sender),
+      });
+      return false;
+
+    case 'STUDYPILOT_GET_AUTH_STATUS':
+      respond(getAuthStatus(), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_CONNECT_SESSION':
+      respond(storeExtensionSession(message.payload), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_DISCONNECT_SESSION':
+      respond(clearExtensionSession(), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_CAPTURE_VISIBLE_TAB':
+      respond(captureVisibleTab(sender), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_GET_SHARED_CONTEXT':
+      respond(getSharedChatContext(), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_GET_CHAT_MESSAGES':
+      respond(getDashboardChatMessages(message.payload.chatId), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_CREATE_CHAT':
+      respond(createDashboardChat(message.payload.title, message.payload.sessionId ?? null), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_CONTINUE_SESSION':
+      respond(getOrCreateSessionChat(message.payload.sessionId, message.payload.title), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_SELECT_CHAT':
+      respond(
+        setActiveDashboardChat(message.payload.chatId).then(() => ({ selected: true as const })),
+        sendResponse,
+      );
+      return true;
+
+    case 'STUDYPILOT_REQUEST_COACHING':
+      respond(
+        prepareCoachingRequest(message.payload, sender).then(async (request) => ({
+          ...(await requestCoaching(request)),
+          screenshotDataUrl: request.screenshotDataUrl,
+        })),
+        sendResponse,
+      );
+      return true;
+
+    case 'STUDYPILOT_LIVE_START': {
+      let parsed: ReturnType<typeof parseLiveStartPayload>;
+      try {
+        parsed = parseLiveStartPayload(message.payload);
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+      const page = getPageContextFromSender(sender);
+      startLive({
+        chatId: parsed.chatId,
+        privacy: parsed.privacy,
+        windowId: sender.tab?.windowId,
+        page: { title: page.sourceTitle, url: page.sourceUrl },
+      })
+        .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            data: toLiveSessionStatus(),
+          }),
+        );
+      return true;
+    }
+
+    case 'STUDYPILOT_LIVE_STOP':
+      stopLive('user_stop')
+        .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+            data: toLiveSessionStatus(),
+          }),
+        );
+      return true;
+
+    case 'STUDYPILOT_LIVE_PAUSE':
+      pauseLive()
+        .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+
+    case 'STUDYPILOT_GET_LIVE_TOKEN':
+      respond(requestLiveToken(message.payload?.sessionId), sendResponse);
+      return true;
+
+    case 'STUDYPILOT_LIVE_RESUME':
+      resumeLive()
+        .then(() => sendResponse({ ok: true, data: toLiveSessionStatus() }))
+        .catch((error) =>
+          sendResponse({
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      return true;
+
+    case 'STUDYPILOT_GET_LIVE_STATUS':
+      sendResponse({ ok: true, data: toLiveSessionStatus() });
+      return false;
+
+    case 'STUDYPILOT_SAVE_SESSION':
+      respond(
+        syncStudySessionToSupabase(message.payload.chatId, message.payload.session, message.payload.finalize ?? false),
+        sendResponse,
+      );
+      return true;
+
+    case 'STUDYPILOT_OPEN_DASHBOARD':
+      respond(
+        chrome.tabs.create({ url: message.payload?.url ?? DASHBOARD_URL }).then(() => ({ opened: true as const })),
+        sendResponse,
+      );
+      return true;
+
+    case 'STUDYPILOT_OPEN_MODAL':
+    case 'STUDYPILOT_TOGGLE_MODAL':
+      return false;
+
+    default:
+      return false;
+  }
+});
 
 function getPageContextFromSender(sender: chrome.runtime.MessageSender): PageContext {
   const tab = sender.tab;
@@ -306,9 +275,7 @@ function getPageContextFromSender(sender: chrome.runtime.MessageSender): PageCon
   };
 }
 
-async function captureVisibleTab(
-  sender: chrome.runtime.MessageSender,
-): Promise<CaptureVisibleTabResult> {
+async function captureVisibleTab(sender: chrome.runtime.MessageSender): Promise<CaptureVisibleTabResult> {
   if (sender.tab?.windowId === undefined) {
     throw new Error('Open StudyPilot on a page before capturing a screenshot.');
   }

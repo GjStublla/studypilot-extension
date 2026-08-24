@@ -2,15 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchLiveToken } from '@/shared/liveEdge';
 import { parseLiveStartPayload } from '@/shared/extensionMessages';
 import { DEFAULT_SESSION_PRIVACY } from '@/shared/types';
-import {
-  isCurrentLiveRuntimeOperation,
-  pauseLive,
-  resumeLive,
-  startLive,
-  stopLive,
-} from './liveRuntime';
+import { isCurrentLiveRuntimeOperation, pauseLive, resumeLive, startLive, stopLive } from './liveRuntime';
 
-vi.mock('@/shared/liveEdge', async importOriginal => {
+vi.mock('@/shared/liveEdge', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/liveEdge')>();
   return {
     ...actual,
@@ -34,9 +28,7 @@ function vertexTokenResponse() {
 }
 
 function installChrome() {
-  const captureVisibleTab = vi.fn(
-    async () => 'data:image/jpeg;base64,ZmFrZXNjcmVlbnNob3Q=',
-  );
+  const captureVisibleTab = vi.fn(async () => 'data:image/jpeg;base64,ZmFrZXNjcmVlbnNob3Q=');
   const sendMessage = vi.fn(async () => undefined);
   const storage = new Map<string, unknown>();
 
@@ -88,9 +80,9 @@ describe('parseLiveStartPayload', () => {
     expect(() => parseLiveStartPayload({ chatId: 'chat-1' })).toThrow(
       /privacy\.captureScreenshot and privacy\.saveToDashboard/,
     );
-    expect(() =>
-      parseLiveStartPayload({ chatId: 'chat-1', captureScreenshot: true }),
-    ).toThrow(/privacy\.captureScreenshot and privacy\.saveToDashboard/);
+    expect(() => parseLiveStartPayload({ chatId: 'chat-1', captureScreenshot: true })).toThrow(
+      /privacy\.captureScreenshot and privacy\.saveToDashboard/,
+    );
     expect(() =>
       parseLiveStartPayload({
         chatId: 'chat-1',
@@ -169,9 +161,7 @@ describe('startLive privacy propagation', () => {
     });
 
     expect(captureVisibleTab).toHaveBeenCalledOnce();
-    expect(fetchLiveTokenMock).toHaveBeenCalledWith(
-      expect.objectContaining({ saveToDashboard: false }),
-    );
+    expect(fetchLiveTokenMock).toHaveBeenCalledWith(expect.objectContaining({ saveToDashboard: false }));
     expect(sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'OFFSCREEN_CONNECT',
@@ -189,16 +179,14 @@ describe('startLive privacy propagation', () => {
     });
 
     expect(captureVisibleTab).not.toHaveBeenCalled();
-    expect(fetchLiveTokenMock).toHaveBeenCalledWith(
-      expect.objectContaining({ saveToDashboard: true }),
-    );
+    expect(fetchLiveTokenMock).toHaveBeenCalledWith(expect.objectContaining({ saveToDashboard: true }));
   });
 
   it('does not broadcast a stale start failure after a newer stop', async () => {
     const { sendMessage } = installChrome();
     let resolveFetchStarted!: () => void;
     let rejectFetch!: (error: Error) => void;
-    const fetchStarted = new Promise<void>(resolve => {
+    const fetchStarted = new Promise<void>((resolve) => {
       resolveFetchStarted = resolve;
     });
     const pendingToken = new Promise<never>((_resolve, reject) => {
@@ -223,8 +211,8 @@ describe('startLive privacy propagation', () => {
     expect(startResult.operationId).toBe(stopResult.operationId);
     const statusMessages = sendMessage.mock.calls
       .map(([message]) => message as { type?: string; state?: string })
-      .filter(message => message.type === 'STUDYPILOT_LIVE_STATUS');
-    expect(statusMessages.some(message => message.state === 'error')).toBe(false);
+      .filter((message) => message.type === 'STUDYPILOT_LIVE_STATUS');
+    expect(statusMessages.some((message) => message.state === 'error')).toBe(false);
   });
 
   it('rejects pause and resume commands while the runtime is idle', async () => {
@@ -235,11 +223,7 @@ describe('startLive privacy propagation', () => {
 
     expect(paused.state).toBe('idle');
     expect(resumed.state).toBe('idle');
-    expect(sendMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'OFFSCREEN_PAUSE' }),
-    );
-    expect(sendMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'OFFSCREEN_RESUME' }),
-    );
+    expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'OFFSCREEN_PAUSE' }));
+    expect(sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'OFFSCREEN_RESUME' }));
   });
 });

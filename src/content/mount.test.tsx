@@ -24,9 +24,7 @@ describe('mountStudyPilot', () => {
     let divCount = 0;
 
     vi.stubGlobal('document', {
-      getElementById: vi.fn((id: string) => (
-        id === 'studypilot-extension-fonts' ? {} : null
-      )),
+      getElementById: vi.fn((id: string) => (id === 'studypilot-extension-fonts' ? {} : null)),
       createElement: vi.fn((tagName: string) => {
         if (tagName === 'style') return style;
         divCount += 1;

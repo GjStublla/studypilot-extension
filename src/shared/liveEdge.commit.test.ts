@@ -33,9 +33,9 @@ describe('canCommitLiveTurn', () => {
       await expect(commitLiveTurn({ ...base, userText: '', assistantText: 'hi' })).rejects.toThrow(
         /both userText and assistantText/,
       );
-      await expect(
-        commitLiveTurn({ ...base, userText: 'hello', assistantText: '   ' }),
-      ).rejects.toThrow(/both userText and assistantText/);
+      await expect(commitLiveTurn({ ...base, userText: 'hello', assistantText: '   ' })).rejects.toThrow(
+        /both userText and assistantText/,
+      );
       await expect(commitLiveTurn({ ...base, userText: null, assistantText: 'hi' })).rejects.toThrow(
         /both userText and assistantText/,
       );
@@ -85,8 +85,6 @@ describe('resolveLiveAuth', () => {
   });
 
   it('rejects missing token', () => {
-    expect(() => resolveLiveAuth({ authMode: 'vertex', websocketUrl: vertexWs })).toThrow(
-      /accessToken/,
-    );
+    expect(() => resolveLiveAuth({ authMode: 'vertex', websocketUrl: vertexWs })).toThrow(/accessToken/);
   });
 });

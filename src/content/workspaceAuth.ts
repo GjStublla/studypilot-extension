@@ -41,7 +41,7 @@ export function readSupabaseStoredAuthSession(): ExtensionAuthSession | null {
   if (typeof window === 'undefined') return null;
 
   const candidateKeys = Object.keys(window.localStorage).filter(
-    key => key === SUPABASE_OAUTH_STORAGE_KEY || /^sb-.+-auth-token$/.test(key),
+    (key) => key === SUPABASE_OAUTH_STORAGE_KEY || /^sb-.+-auth-token$/.test(key),
   );
 
   for (const key of candidateKeys) {
@@ -63,10 +63,11 @@ export function readSupabaseStoredAuthSession(): ExtensionAuthSession | null {
 export function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
   if (!isObject(value)) return null;
 
-  const sessionValue =
-    isObject(value.currentSession) ? value.currentSession :
-    isObject(value.session) ? value.session :
-    value;
+  const sessionValue = isObject(value.currentSession)
+    ? value.currentSession
+    : isObject(value.session)
+      ? value.session
+      : value;
 
   if (!isObject(sessionValue) || typeof sessionValue.access_token !== 'string') {
     return null;

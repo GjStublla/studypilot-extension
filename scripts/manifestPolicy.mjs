@@ -35,15 +35,11 @@ export function evaluateManifest(manifest, runtimeTexts = []) {
   const errors = [];
   const permissions = [
     ...(Array.isArray(manifest.permissions) ? manifest.permissions : []),
-    ...(Array.isArray(manifest.optional_permissions)
-      ? manifest.optional_permissions
-      : []),
+    ...(Array.isArray(manifest.optional_permissions) ? manifest.optional_permissions : []),
   ];
   const hostPermissions = [
     ...(Array.isArray(manifest.host_permissions) ? manifest.host_permissions : []),
-    ...(Array.isArray(manifest.optional_host_permissions)
-      ? manifest.optional_host_permissions
-      : []),
+    ...(Array.isArray(manifest.optional_host_permissions) ? manifest.optional_host_permissions : []),
   ];
 
   if (permissions.includes('microphone')) {
@@ -53,9 +49,7 @@ export function evaluateManifest(manifest, runtimeTexts = []) {
   }
 
   if (!permissions.includes('offscreen')) {
-    errors.push(
-      'missing "offscreen" permission required for getUserMedia in an offscreen document',
-    );
+    errors.push('missing "offscreen" permission required for getUserMedia in an offscreen document');
   }
 
   for (const pattern of hostPermissions) {

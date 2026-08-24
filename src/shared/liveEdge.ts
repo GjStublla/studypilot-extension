@@ -65,11 +65,7 @@ export function resolveLiveAuth(tokenRes: LiveTokenResponse): {
 } {
   const accessToken = (tokenRes.accessToken || tokenRes.ephemeralToken || '').trim();
   if (!accessToken) {
-    throw new Error(
-      tokenRes.error ||
-        tokenRes.blocker ||
-        'live-token returned no accessToken',
-    );
+    throw new Error(tokenRes.error || tokenRes.blocker || 'live-token returned no accessToken');
   }
   const authMode: 'vertex' | 'gemini-ephemeral' =
     tokenRes.authMode === 'gemini-ephemeral'
@@ -188,21 +184,15 @@ export function fetchLiveToken(body: LiveTokenRequest) {
 
 /** POST functions/v1/live-rubric-search — tool fulfillment for search_rubric. */
 export function fetchLiveRubricSearch(body: LiveRubricSearchRequest) {
-  return postEdge<LiveRubricSearchRequest, LiveRubricSearchResponse>(
-    'live-rubric-search',
-    body,
-  );
+  return postEdge<LiveRubricSearchRequest, LiveRubricSearchResponse>('live-rubric-search', body);
 }
 
 /** POST functions/v1/live-turn — commit one finalized voice pair. Never posts empty text. */
 export function commitLiveTurn(body: LiveTurnRequest) {
   const userText = typeof body.userText === 'string' ? body.userText.trim() : '';
-  const assistantText =
-    typeof body.assistantText === 'string' ? body.assistantText.trim() : '';
+  const assistantText = typeof body.assistantText === 'string' ? body.assistantText.trim() : '';
   if (!canCommitLiveTurn(userText, assistantText)) {
-    return Promise.reject(
-      new Error('live-turn requires both userText and assistantText'),
-    );
+    return Promise.reject(new Error('live-turn requires both userText and assistantText'));
   }
   return postEdge<LiveTurnRequest, LiveTurnResponse>('live-turn', {
     ...body,

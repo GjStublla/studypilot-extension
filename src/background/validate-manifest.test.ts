@@ -2,20 +2,13 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import {
-  evaluateManifest,
-  hostnameFromMatchPattern,
-  isLoopbackHostname,
-} from '../../scripts/manifestPolicy.mjs';
+import { evaluateManifest, hostnameFromMatchPattern, isLoopbackHostname } from '../../scripts/manifestPolicy.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const validManifest = {
   permissions: ['activeTab', 'storage', 'offscreen', 'tabs'],
-  host_permissions: [
-    'https://*.supabase.co/*',
-    'https://generativelanguage.googleapis.com/*',
-  ],
+  host_permissions: ['https://*.supabase.co/*', 'https://generativelanguage.googleapis.com/*'],
 };
 
 const runtimeWithUserMedia = ["reasons: ['USER_MEDIA', 'AUDIO_PLAYBACK']"];
@@ -34,10 +27,7 @@ describe('validate-manifest', () => {
   });
 
   it('fails if microphone is listed as an optional permission', () => {
-    const errors = evaluateManifest(
-      { ...validManifest, optional_permissions: ['microphone'] },
-      runtimeWithUserMedia,
-    );
+    const errors = evaluateManifest({ ...validManifest, optional_permissions: ['microphone'] }, runtimeWithUserMedia);
     expect(errors.some((error) => error.includes('microphone'))).toBe(true);
   });
 
@@ -45,11 +35,7 @@ describe('validate-manifest', () => {
     const errors = evaluateManifest(
       {
         ...validManifest,
-        host_permissions: [
-          ...validManifest.host_permissions,
-          'http://127.0.0.1/*',
-          'http://localhost:54321/*',
-        ],
+        host_permissions: [...validManifest.host_permissions, 'http://127.0.0.1/*', 'http://localhost:54321/*'],
       },
       runtimeWithUserMedia,
     );
@@ -58,10 +44,7 @@ describe('validate-manifest', () => {
   });
 
   it('fails when the offscreen permission is missing', () => {
-    const errors = evaluateManifest(
-      { ...validManifest, permissions: ['storage', 'tabs'] },
-      runtimeWithUserMedia,
-    );
+    const errors = evaluateManifest({ ...validManifest, permissions: ['storage', 'tabs'] }, runtimeWithUserMedia);
     expect(errors.some((error) => error.includes('offscreen'))).toBe(true);
   });
 
@@ -82,13 +65,9 @@ describe('validate-manifest', () => {
   });
 
   it('parses loopback match patterns including IPv6 and ports', () => {
-    expect(isLoopbackHostname(hostnameFromMatchPattern('http://127.0.0.1:4177/*'))).toBe(
-      true,
-    );
+    expect(isLoopbackHostname(hostnameFromMatchPattern('http://127.0.0.1:4177/*'))).toBe(true);
     expect(isLoopbackHostname(hostnameFromMatchPattern('http://[::1]/*'))).toBe(true);
-    expect(isLoopbackHostname(hostnameFromMatchPattern('https://*.supabase.co/*'))).toBe(
-      false,
-    );
+    expect(isLoopbackHostname(hostnameFromMatchPattern('https://*.supabase.co/*'))).toBe(false);
   });
 
   it('accepts the source production manifest (no microphone, has offscreen, no loopback hosts)', () => {

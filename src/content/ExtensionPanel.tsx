@@ -1,18 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import {
-  BookmarkCheck,
-  Camera,
-  Check,
-  ExternalLink,
-  Minus,
-  MoreVertical,
-  Pin,
-} from 'lucide-react';
+import { BookmarkCheck, Camera, Check, ExternalLink, Minus, MoreVertical, Pin } from 'lucide-react';
 import type { PointerEventHandler, ReactNode } from 'react';
-import {
-  MenuItem,
-  SparkleLogo,
-} from './PanelComponents';
+import { MenuItem, SparkleLogo } from './PanelComponents';
 
 export interface ExtensionPanelProps {
   panelSize: { w: number; h: number } | null;
@@ -79,28 +68,24 @@ export function ExtensionPanel({
           <SparkleLogo size={30} />
           <strong>Study Pilot</strong>
           {streak > 0 && (
-            <span style={{
-              fontSize: '11px',
-              fontWeight: 600,
-              background: 'linear-gradient(135deg,#f97316,#ef4444)',
-              color: '#fff',
-              borderRadius: '99px',
-              padding: '1px 7px',
-              marginLeft: '4px',
-              letterSpacing: '0.02em',
-            }}>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                background: 'linear-gradient(135deg,#f97316,#ef4444)',
+                color: '#fff',
+                borderRadius: '99px',
+                padding: '1px 7px',
+                marginLeft: '4px',
+                letterSpacing: '0.02em',
+              }}
+            >
               🔥 {streak}d
             </span>
           )}
         </div>
         <div className="sp-header-actions">
-          <button
-            type="button"
-            className="sp-icon-button"
-            aria-label="Minimize"
-            title="Minimize"
-            onClick={onMinimize}
-          >
+          <button type="button" className="sp-icon-button" aria-label="Minimize" title="Minimize" onClick={onMinimize}>
             <Minus size={18} strokeWidth={2} />
           </button>
           <button
@@ -127,12 +112,7 @@ export function ExtensionPanel({
         <AnimatePresence>
           {menuOpen ? (
             <>
-              <button
-                type="button"
-                className="sp-menu-backdrop"
-                aria-label="Close menu"
-                onClick={onToggleMenu}
-              />
+              <button type="button" className="sp-menu-backdrop" aria-label="Close menu" onClick={onToggleMenu} />
               <motion.div
                 className="sp-menu"
                 role="menu"
@@ -167,7 +147,16 @@ export function ExtensionPanel({
                 />
 
                 <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
-                <div style={{ padding: '6px 12px', fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '11px',
+                    color: '#94a3b8',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
                   AI Personality
                 </div>
                 {PERSONALITIES.map((candidate) => (

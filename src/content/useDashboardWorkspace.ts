@@ -10,11 +10,7 @@ import type {
   SharedChatContext,
   StudySession,
 } from '@/shared/types';
-import {
-  presentCanonicalChat,
-  resolveSharedChatId,
-  type CanonicalChatPresentation,
-} from './dashboardChatState';
+import { presentCanonicalChat, resolveSharedChatId, type CanonicalChatPresentation } from './dashboardChatState';
 import { readDashboardAuthSession } from './workspaceAuth';
 export { isDashboardBridgeOrigin } from './workspaceAuth';
 
@@ -34,9 +30,9 @@ export function isCurrentWorkspaceRequest({
   requestedChatId?: string;
   activeChatId?: string | null;
 }): boolean {
-  return mounted
-    && requestSequence === latestSequence
-    && (requestedChatId === undefined || activeChatId === requestedChatId);
+  return (
+    mounted && requestSequence === latestSequence && (requestedChatId === undefined || activeChatId === requestedChatId)
+  );
 }
 
 export interface UseDashboardWorkspaceOptions {
@@ -103,10 +99,13 @@ export function useDashboardWorkspace({
   const savingSessionRef = useRef(false);
   const mountedRef = useRef(true);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    refreshSequenceRef.current += 1;
-  }, []);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      refreshSequenceRef.current += 1;
+    },
+    [],
+  );
 
   async function refreshAuthState() {
     try {
@@ -125,10 +124,7 @@ export function useDashboardWorkspace({
 
   async function refreshExtensionWorkspace() {
     await bridgeDashboardSession();
-    await Promise.all([
-      refreshAuthState(),
-      refreshSharedChatContext(),
-    ]);
+    await Promise.all([refreshAuthState(), refreshSharedChatContext()]);
   }
 
   async function refreshSharedChatContext(preferredChatId?: string | null) {
@@ -141,13 +137,14 @@ export function useDashboardWorkspace({
         type: 'STUDYPILOT_GET_SHARED_CONTEXT',
       });
       if (
-        !response
-        || !isCurrentWorkspaceRequest({
+        !response ||
+        !isCurrentWorkspaceRequest({
           mounted: mountedRef.current,
           requestSequence: refreshSequence,
           latestSequence: refreshSequenceRef.current,
         })
-      ) return;
+      )
+        return;
 
       setSharedContext(response);
       const nextChatId = resolveSharedChatId(response, preferredChatId);
@@ -162,21 +159,27 @@ export function useDashboardWorkspace({
         onChatReset(null);
       }
     } catch (error) {
-      if (!isCurrentWorkspaceRequest({
-        mounted: mountedRef.current,
-        requestSequence: refreshSequence,
-        latestSequence: refreshSequenceRef.current,
-      })) return;
+      if (
+        !isCurrentWorkspaceRequest({
+          mounted: mountedRef.current,
+          requestSequence: refreshSequence,
+          latestSequence: refreshSequenceRef.current,
+        })
+      )
+        return;
       if (isExtensionRuntime()) {
         const message = error instanceof Error ? error.message : 'Could not load StudyPilot chats.';
         flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not refresh chats', 2800);
       }
     } finally {
-      if (isCurrentWorkspaceRequest({
-        mounted: mountedRef.current,
-        requestSequence: refreshSequence,
-        latestSequence: refreshSequenceRef.current,
-      })) setIsRefreshingChats(false);
+      if (
+        isCurrentWorkspaceRequest({
+          mounted: mountedRef.current,
+          requestSequence: refreshSequence,
+          latestSequence: refreshSequenceRef.current,
+        })
+      )
+        setIsRefreshingChats(false);
     }
   }
 
@@ -191,13 +194,15 @@ export function useDashboardWorkspace({
     });
     const canonicalMessages = messages ?? [];
 
-    if (isCurrentWorkspaceRequest({
-      mounted: mountedRef.current,
-      requestSequence: refreshSequence,
-      latestSequence: refreshSequenceRef.current,
-      requestedChatId: chatId,
-      activeChatId: activeChatIdRef.current,
-    })) {
+    if (
+      isCurrentWorkspaceRequest({
+        mounted: mountedRef.current,
+        requestSequence: refreshSequence,
+        latestSequence: refreshSequenceRef.current,
+        requestedChatId: chatId,
+        activeChatId: activeChatIdRef.current,
+      })
+    ) {
       const presentation = presentCanonicalChat(canonicalMessages);
       setChatMessages(presentation.messages);
       onCanonicalPresentation(presentation);
@@ -225,11 +230,13 @@ export function useDashboardWorkspace({
       });
       if (chatId) await loadCanonicalChat(chatId, refreshSequence);
     } catch {
-      if (isCurrentWorkspaceRequest({
-        mounted: mountedRef.current,
-        requestSequence: refreshSequence,
-        latestSequence: refreshSequenceRef.current,
-      })) {
+      if (
+        isCurrentWorkspaceRequest({
+          mounted: mountedRef.current,
+          requestSequence: refreshSequence,
+          latestSequence: refreshSequenceRef.current,
+        })
+      ) {
         flashNotice('Could not open that chat', 2600);
       }
     }
@@ -248,9 +255,9 @@ export function useDashboardWorkspace({
       if (!chat) return null;
       if (!mountedRef.current) return null;
 
-      setSharedContext(previous => previous
-        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
-        : previous);
+      setSharedContext((previous) =>
+        previous ? { ...previous, chats: [chat, ...previous.chats.filter((item) => item.id !== chat.id)] } : previous,
+      );
       await selectDashboardChat(chat.id);
       return chat;
     } finally {
@@ -268,9 +275,9 @@ export function useDashboardWorkspace({
       if (!chat) return;
       if (!mountedRef.current) return;
 
-      setSharedContext(previous => previous
-        ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
-        : previous);
+      setSharedContext((previous) =>
+        previous ? { ...previous, chats: [chat, ...previous.chats.filter((item) => item.id !== chat.id)] } : previous,
+      );
       await selectDashboardChat(chat.id);
       flashNotice(`Continuing ${session.title}`, 2200);
     } catch {
@@ -324,7 +331,7 @@ export function useDashboardWorkspace({
 
   function addInFlightChat(chatId: string) {
     if (!mountedRef.current) return;
-    setInFlightChatIds(previous => new Set(previous).add(chatId));
+    setInFlightChatIds((previous) => new Set(previous).add(chatId));
   }
 
   function adoptChatId(chatId: string) {
@@ -335,7 +342,7 @@ export function useDashboardWorkspace({
 
   function removeInFlightChat(chatId: string) {
     if (!mountedRef.current) return;
-    setInFlightChatIds(previous => {
+    setInFlightChatIds((previous) => {
       const next = new Set(previous);
       next.delete(chatId);
       return next;

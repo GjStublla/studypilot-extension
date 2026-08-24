@@ -1,11 +1,5 @@
 import { AnimatePresence, motion, type Variants } from 'framer-motion';
-import type {
-  ChangeEvent,
-  ClipboardEvent,
-  Dispatch,
-  RefObject,
-  SetStateAction,
-} from 'react';
+import type { ChangeEvent, ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react';
 import type {
   DashboardChatMessage,
   DashboardChatSummary,
@@ -201,11 +195,7 @@ export function PanelBody({
         />
       ) : (
         <>
-          <motion.section
-            className="sp-stage"
-            variants={sectionReveal}
-            aria-live="polite"
-          >
+          <motion.section className="sp-stage" variants={sectionReveal} aria-live="polite">
             <span className="sp-presence-dot" aria-hidden="true" />
             <Orb state={orbState} />
             <p className="sp-status" data-state={orbState}>
@@ -280,7 +270,7 @@ export function PanelBody({
                 <span>{chatMessages.length} messages</span>
               </div>
               <div className="sp-chat-history-list">
-                {chatMessages.slice(-10).map(message => (
+                {chatMessages.slice(-10).map((message) => (
                   <article key={message.id} data-role={message.role}>
                     <span>{message.role === 'user' ? 'You' : 'Coach'}</span>
                     <p>{message.text}</p>
@@ -326,7 +316,8 @@ function WebAppConnectView({ onOpenDashboard }: { onOpenDashboard: () => void })
       </div>
       <div className="sp-login-form">
         <p className="sp-login-error" style={{ margin: 0 }}>
-          Sign in once to connect the extension and dashboard. Open the StudyPilot web app and this panel will connect automatically.
+          Sign in once to connect the extension and dashboard. Open the StudyPilot web app and this panel will connect
+          automatically.
         </p>
         <button type="button" className="sp-login-btn" onClick={onOpenDashboard}>
           Open web app

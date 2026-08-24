@@ -17,20 +17,14 @@ export interface SelectionTooltipProps {
   onQuiz: (text: string) => void;
 }
 
-export function SelectionTooltip({
-  panelOpen,
-  selection,
-  onExplain,
-  onFlashcard,
-  onQuiz,
-}: SelectionTooltipProps) {
+export function SelectionTooltip({ panelOpen, selection, onExplain, onFlashcard, onQuiz }: SelectionTooltipProps) {
   return (
     <AnimatePresence>
       {selection && !panelOpen ? (
         <motion.div
           className="sp-selection-tooltip"
-          onMouseDown={event => event.stopPropagation()}
-          onPointerDown={event => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
           initial={{ opacity: 0, y: selection.placeBelow ? -8 : 8, scale: 0.93 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: selection.placeBelow ? -4 : 4, scale: 0.95 }}
@@ -120,8 +114,12 @@ function TooltipAction({
         whiteSpace: 'nowrap',
         letterSpacing: '0.01em',
       }}
-      onMouseEnter={event => { event.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-      onMouseLeave={event => { event.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = 'transparent';
+      }}
     >
       <span style={{ color }}>{icon}</span>
       {label}
