@@ -46,6 +46,7 @@ import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWo
 import { ExtensionPanel } from './ExtensionPanel';
 import { ChatSwitcher } from './ChatSwitcher';
 import { StudyModePanel } from './StudyModePanel';
+import { isCurrentPanelOperation } from './panelLifecycle';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -356,7 +357,17 @@ export function FloatingStudyPilot({
   const audioContexts = useRef<Set<AudioContext>>(new Set());
   const confettiFrame = useRef<number | undefined>(undefined);
   const confettiAlive = useRef(false);
+  const panelMounted = useRef(true);
+  const panelOperationSequence = useRef(0);
   const sessionStartedAt = useRef(Date.now());
+
+  function isCurrentPanelOperationSequence(operationSequence: number) {
+    return isCurrentPanelOperation({
+      mounted: panelMounted.current,
+      operationSequence,
+      latestSequence: panelOperationSequence.current,
+    });
+  }
 
   function scheduleTimeout(callback: () => void, delay: number): number {
     const timer = window.setTimeout(() => {
@@ -623,6 +634,8 @@ export function FloatingStudyPilot({
 
   useEffect(() => {
     return () => {
+      panelMounted.current = false;
+      panelOperationSequence.current += 1;
       for (const timer of scheduledTimers.current) window.clearTimeout(timer);
       scheduledTimers.current.clear();
       noticeTimer.current = undefined;
@@ -843,6 +856,7 @@ export function FloatingStudyPilot({
   }, [page.host]);
 
   function flashNotice(text: string, duration = 2200) {
+    if (!panelMounted.current) return;
     cancelScheduledTimeout(noticeTimer.current);
     setNotice(text);
     noticeTimer.current = scheduleTimeout(() => {
@@ -856,6 +870,7 @@ export function FloatingStudyPilot({
   }
 
   async function runStudyAction(action: StudyAction, customQuestion?: string, autoSpeak = false) {
+    const operationSequence = ++panelOperationSequence.current;
     const prompt = customQuestion?.trim();
     const targetChatId = activeChatId ?? sessionChatIdRef.current;
     let personalityPrefix = '';
@@ -935,6 +950,8 @@ export function FloatingStudyPilot({
           screenshotDataUrl: attachedScreenshots[0],
         } as CoachingRequest,
       });
+
+      if (!isCurrentPanelOperationSequence(operationSequence)) return;
 
       if (!response) {
         setCard({
@@ -1018,6 +1035,7 @@ export function FloatingStudyPilot({
         }
       }
       await refreshAuthState();
+      if (!isCurrentPanelOperationSequence(operationSequence)) return;
       if (context.saveToDashboard) {
         void persistSessionToDashboard({
           questionText: studentText,
@@ -1029,6 +1047,7 @@ export function FloatingStudyPilot({
         });
       }
     } catch (error) {
+      if (!isCurrentPanelOperationSequence(operationSequence)) return;
       const message = error instanceof Error ? error.message : 'StudyPilot AI could not respond.';
       setCard({
         title: message.includes('connected') || message.includes('signed') || message.includes('session')
@@ -1050,6 +1069,7 @@ export function FloatingStudyPilot({
 
   /** Opens the full-panel study mode and fetches structured content from the AI. */
   async function openStudyMode(action: 'flashcards' | 'quiz', overrideText?: string) {
+    const operationSequence = ++panelOperationSequence.current;
     const targetChatId = activeChatId ?? sessionChatIdRef.current;
     setStudyMode(action);
     setStudyLoading(true);
@@ -1103,6 +1123,8 @@ export function FloatingStudyPilot({
           images: [],
         } as CoachingRequest,
       });
+
+      if (!isCurrentPanelOperationSequence(operationSequence)) return;
 
       if (!response?.text.trim()) throw new Error('No response from StudyPilot AI.');
 
@@ -1169,9 +1191,11 @@ export function FloatingStudyPilot({
         }
       }
     } catch (err) {
-      setStudyError(err instanceof Error ? err.message : 'Could not load content. Try again.');
+      if (isCurrentPanelOperationSequence(operationSequence)) {
+        setStudyError(err instanceof Error ? err.message : 'Could not load content. Try again.');
+      }
     } finally {
-      setStudyLoading(false);
+      if (isCurrentPanelOperationSequence(operationSequence)) setStudyLoading(false);
     }
   }
 
@@ -1217,6 +1241,8 @@ export function FloatingStudyPilot({
         finalize: options.finalize,
       });
 
+      if (!panelMounted.current) return;
+
       if (!response) {
         setCard({
           title: 'Extension runtime required',
@@ -1234,6 +1260,7 @@ export function FloatingStudyPilot({
         2600,
       );
     } catch (error) {
+      if (!panelMounted.current) return;
       const message = error instanceof Error ? error.message : 'Could not save right now';
       flashNotice(
         message.includes('connected') || message.includes('session') || message.includes('expired')
@@ -1267,6 +1294,7 @@ export function FloatingStudyPilot({
       }>({
         type: 'STUDYPILOT_CAPTURE_VISIBLE_TAB',
       });
+      if (!panelMounted.current) return;
       if (snapshot?.dataUrl) {
         setPendingScreenshots(prev => [...prev, snapshot.dataUrl]);
         flashNotice('Screenshot attached', 2200);
@@ -1299,6 +1327,8 @@ export function FloatingStudyPilot({
           }),
       ),
     );
+
+    if (!panelMounted.current) return;
 
     const valid = dataUrls.filter((u): u is string => u !== null);
     if (valid.length > 0) {
@@ -1364,6 +1394,7 @@ export function FloatingStudyPilot({
       document.execCommand('copy');
       scratch.remove();
     }
+    if (!panelMounted.current) return;
     setCopied(true);
     cancelScheduledTimeout(copiedTimer.current);
     copiedTimer.current = scheduleTimeout(() => {
