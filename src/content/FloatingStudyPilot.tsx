@@ -82,6 +82,7 @@ import {
   type StructuredCard,
 } from './PanelComponents';
 export { SettingsSheet } from './PanelComponents';
+import { controlsFromLiveStatus, isLiveBusyState } from './liveCoachingState';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -439,10 +440,13 @@ export function FloatingStudyPilot({
     // Preload available voices so getBestVoice() has them ready.
     if ('speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
-      window.speechSynthesis.addEventListener('voiceschanged', () => {
+      const onVoicesChanged = () => {
         window.speechSynthesis.getVoices(); // triggers caching
-      });
+      };
+      window.speechSynthesis.addEventListener('voiceschanged', onVoicesChanged);
+      return () => window.speechSynthesis.removeEventListener('voiceschanged', onVoicesChanged);
     }
+    return undefined;
   }, []);
 
   useEffect(() => {
@@ -520,14 +524,16 @@ export function FloatingStudyPilot({
       void bridgeDashboardSession();
     };
 
-    window.addEventListener('focus', syncSession);
-    document.addEventListener('visibilitychange', () => {
+    const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') syncSession();
-    });
+    };
+
+    window.addEventListener('focus', syncSession);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('focus', syncSession);
-      document.removeEventListener('visibilitychange', syncSession);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 
@@ -787,11 +793,7 @@ export function FloatingStudyPilot({
   }
 
   const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
-  const liveBusy =
-    liveState === 'starting' ||
-    liveState === 'connecting' ||
-    liveState === 'live' ||
-    liveState === 'paused';
+  const liveBusy = isLiveBusyState(liveState);
   const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
   const orbState: OrbState =
     isActiveChatSending || phase === 'thinking' || liveState === 'connecting' || liveState === 'starting'
@@ -832,16 +834,12 @@ export function FloatingStudyPilot({
   }
 
   function applyLiveStatus(status: LiveSessionStatus) {
+    const controls = controlsFromLiveStatus(status);
     setLiveState(status.state);
-    setLiveFrozen(status.selectionFrozen);
-    setLiveFallback(status.fallback ?? null);
-    const active =
-      status.state === 'live' ||
-      status.state === 'connecting' ||
-      status.state === 'starting' ||
-      status.state === 'paused';
-    setMicOn(active && status.state !== 'paused');
-    setPaused(status.state === 'paused');
+    setLiveFrozen(controls.liveFrozen);
+    setLiveFallback(controls.liveFallback);
+    setMicOn(controls.micOn);
+    setPaused(controls.paused);
     if (status.warning) flashNotice(status.warning, 3600);
     if (status.error && status.state === 'error') {
       flashNotice(status.error, 4200);
@@ -1593,6 +1591,12 @@ export function FloatingStudyPilot({
   const recognitionRef = useRef<any>(null);
   // Hidden file input for the "pick from file explorer" flow
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => {
+    recognitionRef.current?.stop();
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
+  }, []);
 
   function toggleMic() {
     if (liveBusy && liveState !== 'paused') {
