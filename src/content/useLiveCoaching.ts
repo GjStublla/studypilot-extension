@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   sessionPrivacyFromContext,
   type ContextShareSettings,
@@ -123,6 +123,10 @@ export function useLiveCoaching({
     if (status.error && status.state === 'error') flashNotice(status.error, 4200);
   }
 
+  const applyLiveStatusEvent = useEffectEvent((status: LiveSessionStatus) => {
+    applyLiveStatus(status);
+  });
+
   // Rehydrate the panel from the service worker when it mounts. Live owns the
   // microphone/WebSocket lifecycle outside the content script, so closing or
   // reloading the panel must not make an in-flight operation disappear from
@@ -134,7 +138,7 @@ export function useLiveCoaching({
       type: 'STUDYPILOT_GET_LIVE_STATUS',
     })
       .then((response) => {
-        if (active && response) applyLiveStatus(response);
+        if (active && response) applyLiveStatusEvent(response);
       })
       .catch(() => {
         // A service-worker restart or a page without extension runtime is
@@ -144,8 +148,6 @@ export function useLiveCoaching({
     return () => {
       active = false;
     };
-    // Rehydrate once per controller mount; later runtime messages update the same state machine.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyLiveStatus is intentionally mount-scoped.
   }, [sendRuntimeMessage]);
 
   function stopSpeechRecognition() {

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Crown } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
   isLiveFanoutMessage,
@@ -440,72 +440,74 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
     };
   }, []);
 
+  const handleRuntimeMessage = useEffectEvent((message: unknown) => {
+    if (panelRejectsSecrets(message)) {
+      console.warn('[StudyPilot] Refusing panel message that appears to contain secrets.');
+      return false;
+    }
+    if (isLiveFanoutMessage(message)) {
+      if (message.type === 'STUDYPILOT_LIVE_STATUS') {
+        applyLiveStatus({
+          state: message.state,
+          selectionFrozen: message.selectionFrozen,
+          error: message.error,
+          warning: message.warning,
+          fallback: message.fallback ?? null,
+          rubric: message.rubric,
+          ragReady: message.ragReady,
+          chatId: message.selection.chatId,
+        });
+      } else if (message.type === 'STUDYPILOT_LIVE_WARNING' && message.message) {
+        flashNotice(message.message, 3600);
+      } else if (message.type === 'STUDYPILOT_LIVE_TRANSCRIPT' && message.finalized && message.text) {
+        setTranscript((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: message.role === 'assistant' ? 'ai' : 'user',
+            text: message.text,
+            atSeconds: Math.floor(Date.now() / 1000),
+            sequence: prev.length + 1,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+        if (message.role === 'assistant') {
+          setCard({ title: 'Live coach', body: message.text });
+          setCardOpen(true);
+          setPhase('answer');
+        }
+      }
+      return false;
+    }
+    if (!isStudyPilotRuntimeMessage(message)) return false;
+    if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
+    if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen((value) => !value);
+    return false;
+  });
+
+  const bridgeDashboardSessionEvent = useEffectEvent(() => {
+    void bridgeDashboardSession();
+  });
+
+  const refreshWorkspaceOnOpen = useEffectEvent(() => {
+    void refreshExtensionWorkspace();
+  });
+
   useEffect(() => {
     if (!isExtensionRuntime()) return;
 
-    const listener = (message: unknown) => {
-      if (panelRejectsSecrets(message)) {
-        console.warn('[StudyPilot] Refusing panel message that appears to contain secrets.');
-        return false;
-      }
-      if (isLiveFanoutMessage(message)) {
-        if (message.type === 'STUDYPILOT_LIVE_STATUS') {
-          applyLiveStatus({
-            state: message.state,
-            selectionFrozen: message.selectionFrozen,
-            error: message.error,
-            warning: message.warning,
-            fallback: message.fallback ?? null,
-            rubric: message.rubric,
-            ragReady: message.ragReady,
-            chatId: message.selection.chatId,
-          });
-        } else if (message.type === 'STUDYPILOT_LIVE_WARNING' && message.message) {
-          flashNotice(message.message, 3600);
-        } else if (message.type === 'STUDYPILOT_LIVE_TRANSCRIPT' && message.finalized && message.text) {
-          setTranscript((prev) => [
-            ...prev,
-            {
-              id: crypto.randomUUID(),
-              role: message.role === 'assistant' ? 'ai' : 'user',
-              text: message.text,
-              atSeconds: Math.floor(Date.now() / 1000),
-              sequence: prev.length + 1,
-              createdAt: new Date().toISOString(),
-            },
-          ]);
-          if (message.role === 'assistant') {
-            setCard({ title: 'Live coach', body: message.text });
-            setCardOpen(true);
-            setPhase('answer');
-          }
-        }
-        return false;
-      }
-      if (!isStudyPilotRuntimeMessage(message)) return false;
-      if (message.type === 'STUDYPILOT_OPEN_MODAL') setIsOpen(true);
-      if (message.type === 'STUDYPILOT_TOGGLE_MODAL') setIsOpen((value) => !value);
-      return false;
-    };
-
-    chrome.runtime.onMessage.addListener(listener);
-    return () => chrome.runtime.onMessage.removeListener(listener);
-    // The runtime listener is registered once; its handlers only use stable refs/setters.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-registering on each render duplicates runtime listeners.
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
   }, []);
 
   useEffect(() => {
-    void bridgeDashboardSession();
-    // Bridge once on mount; visibility/focus events below handle later synchronization.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the bridge is a mount-time handshake.
+    bridgeDashboardSessionEvent();
   }, []);
 
   useEffect(() => {
     if (!isDashboardBridgeOrigin()) return;
 
-    const syncSession = () => {
-      void bridgeDashboardSession();
-    };
+    const syncSession = () => bridgeDashboardSessionEvent();
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') syncSession();
@@ -518,8 +520,6 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
       window.removeEventListener('focus', syncSession);
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-    // Register the page lifecycle listeners once for this panel instance.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks intentionally retain the mount-time bridge.
   }, []);
 
   useEffect(() => {
@@ -590,9 +590,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
   }, []);
 
   useEffect(() => {
-    if (isOpen) void refreshExtensionWorkspace();
-    // Refresh only on open transitions; the workspace controller owns request sequencing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- including the render-local controller would loop while open.
+    if (isOpen) refreshWorkspaceOnOpen();
   }, [isOpen]);
 
   useEffect(() => {
@@ -651,6 +649,24 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
     }
   }, []);
 
+  const completePomodoro = useEffectEvent(() => {
+    setPomodoroEndTime(null);
+    if (typeof chrome !== 'undefined' && chrome.storage) {
+      chrome.storage.local.get('pomodoroStats', (res) => {
+        const today = new Date().toISOString().split('T')[0];
+        const stats = res.pomodoroStats || {};
+        stats[today] = (stats[today] || 0) + pomodoroDuration;
+        chrome.storage.local.set({ pomodoroStats: stats }).catch(() => {});
+      });
+      chrome.storage.local.remove(['pomodoroEndTime', 'pomodoroDuration']).catch(() => {});
+    }
+    playChime();
+    void runStudyAction(
+      'explain',
+      `The student just completed a ${pomodoroDuration}-minute focus session. Briefly congratulate them and ask them what 2 things they learned. Keep it very short.`,
+    );
+  });
+
   useEffect(() => {
     if (!pomodoroEndTime) {
       setPomodoroRemaining(null);
@@ -662,30 +678,13 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
       setPomodoroRemaining(remaining);
 
       if (remaining <= 0) {
-        setPomodoroEndTime(null);
-        if (typeof chrome !== 'undefined' && chrome.storage) {
-          chrome.storage.local.get('pomodoroStats', (res) => {
-            const today = new Date().toISOString().split('T')[0];
-            const stats = res.pomodoroStats || {};
-            stats[today] = (stats[today] || 0) + pomodoroDuration;
-            chrome.storage.local.set({ pomodoroStats: stats }).catch(() => {});
-          });
-          chrome.storage.local.remove(['pomodoroEndTime', 'pomodoroDuration']).catch(() => {});
-        }
-        playChime();
-        void runStudyAction(
-          'explain',
-          `The student just completed a ${pomodoroDuration}-minute focus session. Briefly congratulate them and ask them what 2 things they learned. Keep it very short.`,
-        );
+        completePomodoro();
       }
     };
 
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
-    // The interval is keyed by the deadline; action functions are intentionally
-    // read from the render that created the timer to avoid restarting it every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- pomodoroEndTime is the lifecycle key.
   }, [pomodoroEndTime]);
 
   function startPomodoro(minutes: number) {
