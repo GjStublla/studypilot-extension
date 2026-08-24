@@ -11,6 +11,8 @@ const chat = {
   rubric_id: RUBRIC_ID,
 };
 let messages = [];
+const pendingLiveTokenResponses = new Set();
+let liveTokenReleased = false;
 
 const html = `<!doctype html>
 <html lang="en">
@@ -44,6 +46,35 @@ function writeSse(response, body) {
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1:4177');
+
+  if (url.pathname === '/e2e/reset-live-token' && request.method === 'POST') {
+    liveTokenReleased = false;
+    writeJson(response, { ok: true });
+    return;
+  }
+
+  if (url.pathname === '/e2e/live-token-status' && request.method === 'GET') {
+    writeJson(response, {
+      pending: pendingLiveTokenResponses.size,
+      released: liveTokenReleased,
+    });
+    return;
+  }
+
+  if (url.pathname === '/e2e/release-live-token' && request.method === 'POST') {
+    liveTokenReleased = true;
+    const pending = [...pendingLiveTokenResponses];
+    pendingLiveTokenResponses.clear();
+    for (const pendingResponse of pending) {
+      writeJson(
+        pendingResponse,
+        { error: 'e2e delayed live-token released' },
+        503,
+      );
+    }
+    writeJson(response, { ok: true, released: pending.length });
+    return;
+  }
 
   if (url.pathname.startsWith('/rest/v1/')) {
     if (url.pathname === '/rest/v1/dashboard_chats' && request.method === 'GET') {
@@ -118,6 +149,22 @@ const server = http.createServer((request, response) => {
         '',
       ].join('\n'));
     });
+    return;
+  }
+
+  if (url.pathname === '/functions/v1/live-token' && request.method === 'POST') {
+    request.resume();
+    if (!liveTokenReleased) {
+      pendingLiveTokenResponses.add(response);
+      return;
+    }
+    writeJson(response, { error: 'e2e live-token unavailable' }, 503);
+    return;
+  }
+
+  if (url.pathname === '/functions/v1/live-finish' && request.method === 'POST') {
+    request.resume();
+    writeJson(response, { ok: true });
     return;
   }
 

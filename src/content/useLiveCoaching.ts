@@ -122,6 +122,29 @@ export function useLiveCoaching({
     if (status.error && status.state === 'error') flashNotice(status.error, 4200);
   }
 
+  // Rehydrate the panel from the service worker when it mounts. Live owns the
+  // microphone/WebSocket lifecycle outside the content script, so closing or
+  // reloading the panel must not make an in-flight operation disappear from
+  // the UI. The mounted guard also prevents a late response from updating a
+  // panel that has already been unmounted.
+  useEffect(() => {
+    let active = true;
+    void sendRuntimeMessage<LiveSessionStatus>({
+      type: 'STUDYPILOT_GET_LIVE_STATUS',
+    })
+      .then(response => {
+        if (active && response) applyLiveStatus(response);
+      })
+      .catch(() => {
+        // A service-worker restart or a page without extension runtime is
+        // recoverable; the panel remains in its local idle state.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [sendRuntimeMessage]);
+
   function stopSpeechRecognition() {
     const recognition = recognitionRef.current;
     recognitionRef.current = null;

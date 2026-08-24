@@ -249,4 +249,59 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
       .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
       .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
   });
+
+  test('live start/stop survives panel unmount without stale errors', async ({
+    context,
+    extensionId,
+  }) => {
+    await seedFixtureSession(context, extensionId, CHAT_ID);
+    const page = await openFixturePage(context);
+    const errors: string[] = [];
+    const recordErrors = (target: Page) => {
+      target.on('pageerror', error => errors.push(error.message));
+      target.on('console', message => {
+        if (message.type() === 'error') errors.push(message.text());
+      });
+    };
+    recordErrors(page);
+    context.on('page', recordErrors);
+
+    await page.evaluate(() => fetch('/e2e/reset-live-token', { method: 'POST' }));
+    await clickShadow(page, LAUNCHER);
+    await clickShadow(page, 'button[aria-label="Unmute microphone"]');
+    await expect
+      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
+      .toMatch(/Starting Live/i);
+    await expect
+      .poll(
+        () => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending),
+        { timeout: 10_000 },
+      )
+      .toBe(1);
+
+    // Unmount and remount the panel while the service worker still owns the
+    // delayed start. The remounted panel must hydrate the in-flight state.
+    await clickShadow(page, 'button[aria-label="Minimize"]');
+    await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
+    await clickShadow(page, LAUNCHER);
+    await expect
+      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
+      .toMatch(/Starting Live/i);
+
+    // Stop the newer, visible operation before releasing the delayed token.
+    await clickShadow(page, 'button[aria-label="Mute microphone"]');
+    await expect
+      .poll(() => shadowText(page, STATUS), { timeout: 10_000 })
+      .toMatch(/Mic muted|Connect dashboard/i);
+
+    await page.evaluate(() => fetch('/e2e/release-live-token', { method: 'POST' }));
+    await expect
+      .poll(
+        () => page.evaluate(async () => (await (await fetch('/e2e/live-token-status')).json()).pending),
+        { timeout: 10_000 },
+      )
+      .toBe(0);
+    await page.waitForTimeout(400);
+    expect(errors).toEqual([]);
+  });
 });
