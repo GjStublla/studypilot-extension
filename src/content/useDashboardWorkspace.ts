@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import type { StudyPilotRuntimeMessage } from '@/shared/extensionMessages';
 import type {
@@ -18,6 +18,24 @@ export { isDashboardBridgeOrigin } from './workspaceAuth';
 
 type RuntimeMessageSender = <T>(message: StudyPilotRuntimeMessage) => Promise<T | null>;
 type Notice = (message: string, duration?: number) => void;
+
+export function isCurrentWorkspaceRequest({
+  mounted,
+  requestSequence,
+  latestSequence,
+  requestedChatId,
+  activeChatId,
+}: {
+  mounted: boolean;
+  requestSequence: number;
+  latestSequence: number;
+  requestedChatId?: string;
+  activeChatId?: string | null;
+}): boolean {
+  return mounted
+    && requestSequence === latestSequence
+    && (requestedChatId === undefined || activeChatId === requestedChatId);
+}
 
 export interface UseDashboardWorkspaceOptions {
   flashNotice: Notice;
@@ -73,14 +91,21 @@ export function useDashboardWorkspace({
   const activeChatIdRef = useRef<string | null>(null);
   const refreshSequenceRef = useRef(0);
   const creatingChatRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    refreshSequenceRef.current += 1;
+  }, []);
 
   async function refreshAuthState() {
     try {
       const response = await sendRuntimeMessage<ExtensionAuthState>({
         type: 'STUDYPILOT_GET_AUTH_STATUS',
       });
-      if (response) setAuthState(response);
+      if (mountedRef.current && response) setAuthState(response);
     } catch (error) {
+      if (!mountedRef.current) return;
       setAuthState({
         connected: false,
         error: error instanceof Error ? error.message : STUDYPILOT_CONNECT_MESSAGE,
@@ -98,13 +123,21 @@ export function useDashboardWorkspace({
 
   async function refreshSharedChatContext(preferredChatId?: string | null) {
     const refreshSequence = ++refreshSequenceRef.current;
+    if (!mountedRef.current) return;
     setIsRefreshingChats(true);
 
     try {
       const response = await sendRuntimeMessage<SharedChatContext>({
         type: 'STUDYPILOT_GET_SHARED_CONTEXT',
       });
-      if (!response || refreshSequence !== refreshSequenceRef.current) return;
+      if (
+        !response
+        || !isCurrentWorkspaceRequest({
+          mounted: mountedRef.current,
+          requestSequence: refreshSequence,
+          latestSequence: refreshSequenceRef.current,
+        })
+      ) return;
 
       setSharedContext(response);
       const nextChatId = resolveSharedChatId(response, preferredChatId);
@@ -119,13 +152,21 @@ export function useDashboardWorkspace({
         onChatReset(null);
       }
     } catch (error) {
-      if (refreshSequence !== refreshSequenceRef.current) return;
+      if (!isCurrentWorkspaceRequest({
+        mounted: mountedRef.current,
+        requestSequence: refreshSequence,
+        latestSequence: refreshSequenceRef.current,
+      })) return;
       if (isExtensionRuntime()) {
         const message = error instanceof Error ? error.message : 'Could not load StudyPilot chats.';
         flashNotice(message.includes('connected') ? 'Connect dashboard first' : 'Could not refresh chats', 2800);
       }
     } finally {
-      if (refreshSequence === refreshSequenceRef.current) setIsRefreshingChats(false);
+      if (isCurrentWorkspaceRequest({
+        mounted: mountedRef.current,
+        requestSequence: refreshSequence,
+        latestSequence: refreshSequenceRef.current,
+      })) setIsRefreshingChats(false);
     }
   }
 
@@ -133,16 +174,20 @@ export function useDashboardWorkspace({
     chatId: string,
     refreshSequence = ++refreshSequenceRef.current,
   ): Promise<DashboardChatMessage[]> {
+    if (!mountedRef.current) return [];
     const messages = await sendRuntimeMessage<DashboardChatMessage[]>({
       type: 'STUDYPILOT_GET_CHAT_MESSAGES',
       payload: { chatId },
     });
     const canonicalMessages = messages ?? [];
 
-    if (
-      refreshSequence === refreshSequenceRef.current
-      && activeChatIdRef.current === chatId
-    ) {
+    if (isCurrentWorkspaceRequest({
+      mounted: mountedRef.current,
+      requestSequence: refreshSequence,
+      latestSequence: refreshSequenceRef.current,
+      requestedChatId: chatId,
+      activeChatId: activeChatIdRef.current,
+    })) {
       const presentation = presentCanonicalChat(canonicalMessages);
       setChatMessages(presentation.messages);
       onCanonicalPresentation(presentation);
@@ -151,6 +196,7 @@ export function useDashboardWorkspace({
   }
 
   async function selectDashboardChat(chatId: string | null) {
+    if (!mountedRef.current) return;
     if (isLiveLocked()) {
       flashNotice('Chat is locked while Live is active', 2600);
       return;
@@ -169,7 +215,11 @@ export function useDashboardWorkspace({
       });
       if (chatId) await loadCanonicalChat(chatId, refreshSequence);
     } catch {
-      if (refreshSequence === refreshSequenceRef.current) {
+      if (isCurrentWorkspaceRequest({
+        mounted: mountedRef.current,
+        requestSequence: refreshSequence,
+        latestSequence: refreshSequenceRef.current,
+      })) {
         flashNotice('Could not open that chat', 2600);
       }
     }
@@ -186,6 +236,7 @@ export function useDashboardWorkspace({
         payload: { title },
       });
       if (!chat) return null;
+      if (!mountedRef.current) return null;
 
       setSharedContext(previous => previous
         ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
@@ -194,7 +245,7 @@ export function useDashboardWorkspace({
       return chat;
     } finally {
       creatingChatRef.current = false;
-      setIsCreatingChat(false);
+      if (mountedRef.current) setIsCreatingChat(false);
     }
   }
 
@@ -205,6 +256,7 @@ export function useDashboardWorkspace({
         payload: { sessionId: session.id, title: session.title },
       });
       if (!chat) return;
+      if (!mountedRef.current) return;
 
       setSharedContext(previous => previous
         ? { ...previous, chats: [chat, ...previous.chats.filter(item => item.id !== chat.id)] }
@@ -212,7 +264,7 @@ export function useDashboardWorkspace({
       await selectDashboardChat(chat.id);
       flashNotice(`Continuing ${session.title}`, 2200);
     } catch {
-      flashNotice('Could not continue that session', 2800);
+      if (mountedRef.current) flashNotice('Could not continue that session', 2800);
     }
   }
 
@@ -226,6 +278,7 @@ export function useDashboardWorkspace({
         payload: dashboardSession,
       });
       if (response?.connected) {
+        if (!mountedRef.current) return;
         setAuthState(response);
         flashNotice('Extension connected', 2400);
       }
@@ -235,15 +288,18 @@ export function useDashboardWorkspace({
   }
 
   function addInFlightChat(chatId: string) {
+    if (!mountedRef.current) return;
     setInFlightChatIds(previous => new Set(previous).add(chatId));
   }
 
   function adoptChatId(chatId: string) {
+    if (!mountedRef.current) return;
     activeChatIdRef.current = chatId;
     setActiveChatId(chatId);
   }
 
   function removeInFlightChat(chatId: string) {
+    if (!mountedRef.current) return;
     setInFlightChatIds(previous => {
       const next = new Set(previous);
       next.delete(chatId);
