@@ -23,26 +23,18 @@ import {
   type StudyTranscriptTurn,
 } from '@/shared/types';
 import {
-  Orb,
-  SparkleLogo,
   type FlashcardItem,
   type OrbState,
   type QuizItem,
   type StructuredCard,
 } from './PanelComponents';
-import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
-import { ComposerPanel } from './ComposerPanel';
-import { VoiceDock } from './VoiceDock';
-import { PomodoroPicker } from './PomodoroPicker';
+import type { AnswerCardData } from './AnswerCardPanel';
 import { SelectionTooltip, type SelectionTooltipData } from './SelectionTooltip';
-import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
-import { QuickActions } from './QuickActions';
 import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWorkspace';
 import { ExtensionPanel } from './ExtensionPanel';
-import { ChatSwitcher } from './ChatSwitcher';
-import { StudyModePanel } from './StudyModePanel';
+import { PanelBody } from './PanelBody';
 import { isCurrentPanelOperation } from './panelLifecycle';
 
 const LOCAL_PREVIEW_TEXT =
@@ -1477,160 +1469,72 @@ export function FloatingStudyPilot({
               }}
             >
 
-            <motion.div
-              className="sp-body"
-              initial="hidden"
-              animate="show"
-              variants={{
-                hidden: {},
-                show: { transition: { staggerChildren: 0.055, delayChildren: 0.08 } },
+            <PanelBody
+              authConnected={authState?.connected !== false}
+              activeChatId={activeChatId}
+              activeChat={activeChat}
+              chatMessages={chatMessages}
+              sharedContext={sharedContext}
+              isCreatingChat={isCreatingChat}
+              isRefreshingChats={isRefreshingChats}
+              liveFrozen={liveFrozen}
+              liveBusy={liveBusy}
+              studyMode={studyMode}
+              studyLoading={studyLoading}
+              studyError={studyError}
+              structuredCard={structuredCard}
+              page={page}
+              context={context}
+              card={card}
+              cardOpen={cardOpen}
+              cardScreenshotDataUrl={cardScreenshotDataUrl}
+              copied={copied}
+              feedback={feedback}
+              thinking={phase === 'thinking'}
+              orbState={orbState}
+              statusText={statusText}
+              micOn={micOn}
+              paused={paused}
+              isSpeaking={isSpeaking}
+              liveState={liveState}
+              settingsOpen={settingsOpen}
+              pendingScreenshots={pendingScreenshots}
+              fileInputRef={fileInputRef}
+              question={question}
+              pomodoroRemaining={pomodoroRemaining}
+              pomodoroStats={pomodoroStats}
+              pomodoroPickerOpen={pomodoroPickerOpen}
+              onSelectChat={chatId => void selectDashboardChat(chatId)}
+              onCreateChat={() => {
+                void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
               }}
-            >
-              {authState?.connected !== false ? (
-                <ChatSwitcher
-                  activeChatId={activeChatId}
-                  activeChat={activeChat}
-                  sharedContext={sharedContext}
-                  disabled={liveFrozen || liveBusy}
-                  isCreatingChat={isCreatingChat}
-                  isRefreshingChats={isRefreshingChats}
-                  variants={sectionReveal}
-                  onSelectChat={chatId => void selectDashboardChat(chatId)}
-                  onCreateChat={() => {
-                    void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
-                  }}
-                  onRefreshChats={() => void refreshSharedChatContext(activeChatIdRef.current)}
-                />
-              ) : null}
-
-              {/* Show a web-app connect prompt when no session is available */}
-              {authState?.connected === false ? (
-                <WebAppConnectView onOpenDashboard={() => void openDashboard()} />
-              ) : studyMode !== null ? (
-                <StudyModePanel
-                  mode={studyMode}
-                  loading={studyLoading}
-                  error={studyError}
-                  card={structuredCard}
-                  onClose={closeStudyMode}
-                  onRegenerate={(mode) => { void openStudyMode(mode); }}
-                  onPerfectScore={fireConfetti}
-                />
-              ) : (
-              <><motion.section
-                  className="sp-stage"
-                  variants={sectionReveal}
-                  aria-live="polite"
-                >
-                <span className="sp-presence-dot" aria-hidden="true" />
-                <Orb state={orbState} />
-                <p className="sp-status" data-state={orbState}>
-                  {statusText}
-                </p>
-                <h2 className="sp-headline">Ask anything about this page</h2>
-              </motion.section>
-
-              <VoiceDock
-                micOn={micOn}
-                paused={paused}
-                isSpeaking={isSpeaking}
-                liveState={liveState}
-                liveBusy={liveBusy}
-                settingsOpen={settingsOpen}
-                variants={sectionReveal}
-                onToggleMic={toggleMic}
-                onSpeak={speakAnswer}
-                onTogglePause={togglePause}
-                onToggleSettings={() => setSettingsOpen(value => !value)}
-              />
-
-              <AnimatePresence initial={false}>
-                {settingsOpen ? (
-                  <motion.div
-                    key="settings"
-                    className="sp-settings-wrap"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                  >
-                    <SettingsSheet
-                      page={page}
-                      context={context}
-                      onChange={setContext}
-                      onOpenDashboard={() => void openDashboard()}
-                    />
-                  </motion.div>
-                ) : null}
-              </AnimatePresence>
-
-              <ComposerPanel
-                pendingScreenshots={pendingScreenshots}
-                fileInputRef={fileInputRef}
-                question={question}
-                variants={sectionReveal}
-                onPaste={handleComposerPaste}
-                onRemoveScreenshot={removePendingScreenshot}
-                onOpenFilePicker={openFilePicker}
-                onFileInputChange={handleFileInputChange}
-                onQuestionChange={setQuestion}
-                onSubmit={handleSubmit}
-              />
-
-              <motion.div className="sp-chips" variants={sectionReveal}>
-                <QuickActions
-                  sharedContext={sharedContext}
-                  pomodoroRemaining={pomodoroRemaining}
-                  formatTime={formatTime}
-                  onRunStudyAction={action => void runStudyAction(action)}
-                  onOpenStudyMode={mode => void openStudyMode(mode)}
-                  onContinueSession={session => void continueDashboardSession(session)}
-                  onStopPomodoro={stopPomodoro}
-                  onTogglePomodoroPicker={() => setPomodoroPickerOpen(value => !value)}
-                />
-              </motion.div>
-
-              {activeChat && chatMessages.length > 0 ? (
-                <motion.section className="sp-chat-history" variants={sectionReveal} aria-label="Shared chat history">
-                  <div className="sp-chat-history-head">
-                    <strong>{activeChat.title}</strong>
-                    <span>{chatMessages.length} messages</span>
-                  </div>
-                  <div className="sp-chat-history-list">
-                    {chatMessages.slice(-10).map(message => (
-                      <article key={message.id} data-role={message.role}>
-                        <span>{message.role === 'user' ? 'You' : 'Coach'}</span>
-                        <p>{message.text}</p>
-                      </article>
-                    ))}
-                  </div>
-                </motion.section>
-              ) : null}
-
-              <PomodoroPicker
-                open={pomodoroPickerOpen}
-                remainingSeconds={pomodoroRemaining}
-                stats={pomodoroStats}
-                onStart={startPomodoro}
-              />
-
-              <AnswerCardPanel
-                card={card}
-                cardOpen={cardOpen}
-                structuredCard={structuredCard}
-                screenshotDataUrl={cardScreenshotDataUrl}
-                isSpeaking={isSpeaking}
-                copied={copied}
-                feedback={feedback}
-                thinking={phase === 'thinking'}
-                onToggleOpen={() => setCardOpen(value => !value)}
-                onSpeak={speakAnswer}
-                onCopy={copyAnswer}
-                onFeedback={(value) => setFeedback(current => (current === value ? null : value))}
-              />
-              </>
-            )}
-            </motion.div>{/* end sp-body */}
+              onRefreshChats={() => void refreshSharedChatContext(activeChatIdRef.current)}
+              onOpenDashboard={() => void openDashboard()}
+              onCloseStudyMode={closeStudyMode}
+              onRegenerateStudyMode={mode => { void openStudyMode(mode); }}
+              onPerfectScore={fireConfetti}
+              onToggleMic={toggleMic}
+              onSpeak={speakAnswer}
+              onTogglePause={togglePause}
+              onToggleSettings={() => setSettingsOpen(value => !value)}
+              onChangeContext={setContext}
+              onPaste={handleComposerPaste}
+              onRemoveScreenshot={removePendingScreenshot}
+              onOpenFilePicker={openFilePicker}
+              onFileInputChange={handleFileInputChange}
+              onQuestionChange={setQuestion}
+              onSubmit={handleSubmit}
+              formatTime={formatTime}
+              onRunStudyAction={action => void runStudyAction(action)}
+              onOpenStudyMode={mode => void openStudyMode(mode)}
+              onContinueSession={session => void continueDashboardSession(session)}
+              onStopPomodoro={stopPomodoro}
+              onTogglePomodoroPicker={() => setPomodoroPickerOpen(value => !value)}
+              onStartPomodoro={startPomodoro}
+              onToggleCard={() => setCardOpen(value => !value)}
+              onCopy={copyAnswer}
+              onFeedback={value => setFeedback(current => (current === value ? null : value))}
+            />
 
 
             <footer className="sp-footer">
@@ -1679,15 +1583,6 @@ export function FloatingStudyPilot({
     </>
   );
 }
-
-const sectionReveal = {
-  hidden: { opacity: 0, y: 14 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.34, ease: [0.22, 1, 0.36, 1] as const },
-  },
-};
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
 // Converts **bold**, *italic*, and \n line breaks into React nodes.
@@ -1762,33 +1657,4 @@ function fallbackTranscript(question: string, answer: string): StudyTranscriptTu
   ];
 
   return turns.filter(turn => turn.text.trim().length > 0);
-}
-
-/* ============================================================================
-   WebAppConnectView — shown when the extension has no stored session.
-   Directs users to the StudyPilot web app, where the extension can connect
-   automatically once the browser session is available.
-   ============================================================================ */
-
-function WebAppConnectView({
-  onOpenDashboard,
-}: {
-  onOpenDashboard: () => void;
-}) {
-  return (
-    <div className="sp-login">
-      <div className="sp-login-brand">
-        <SparkleLogo size={28} />
-        <span>Connect StudyPilot</span>
-      </div>
-      <div className="sp-login-form">
-        <p className="sp-login-error" style={{ margin: 0 }}>
-          Sign in once to connect the extension and dashboard. Open the StudyPilot web app and this panel will connect automatically.
-        </p>
-        <button type="button" className="sp-login-btn" onClick={onOpenDashboard}>
-          Open web app
-        </button>
-      </div>
-    </div>
-  );
 }
