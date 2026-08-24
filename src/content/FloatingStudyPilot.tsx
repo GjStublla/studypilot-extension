@@ -80,6 +80,7 @@ import {
 } from './PanelComponents';
 export { SettingsSheet } from './PanelComponents';
 import { useLiveCoaching } from './useLiveCoaching';
+import { presentCanonicalChat, resolveSharedChatId } from './dashboardChatState';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -223,20 +224,6 @@ async function sendRuntimeMessage<T>(
     throw new Error(response?.error ?? 'StudyPilot action failed.');
   }
   return response.data as T;
-}
-
-function transcriptTurnFromMessage(
-  message: DashboardChatMessage,
-  index: number,
-): StudyTranscriptTurn {
-  return {
-    id: message.id,
-    role: message.role,
-    text: message.text,
-    atSeconds: Math.max(0, index),
-    sequence: message.sequence,
-    createdAt: message.createdAt,
-  };
 }
 
 export function FloatingStudyPilot({
@@ -878,10 +865,7 @@ export function FloatingStudyPilot({
       if (!response || refreshSequence !== refreshSequenceRef.current) return;
 
       setSharedContext(response);
-      const requestedChatId = preferredChatId ?? response.activeChatId;
-      const nextChatId = requestedChatId && response.chats.some(chat => chat.id === requestedChatId)
-        ? requestedChatId
-        : null;
+      const nextChatId = resolveSharedChatId(response, preferredChatId);
       if (activeChatIdRef.current !== nextChatId) {
         setQuestion('');
         setLastQuestion('');
@@ -932,33 +916,13 @@ export function FloatingStudyPilot({
   }
 
   function applyCanonicalMessages(messages: DashboardChatMessage[]) {
-    const visibleMessages = messages.filter(message => message.role !== 'system');
-    setChatMessages(visibleMessages);
-    const canonicalTranscript = visibleMessages.map((message, index) =>
-      transcriptTurnFromMessage(message, index));
-    setTranscript(canonicalTranscript);
-
-    const latestAi = [...visibleMessages].reverse().find(message => message.role === 'ai');
-    const latestUser = [...visibleMessages].reverse().find(message => message.role === 'user');
-    setLastQuestion(latestUser?.text ?? '');
-    if (latestAi) {
-      setCard({ title: 'Coach response', body: latestAi.text });
-      setCardOpen(true);
-      setPhase('answer');
-    } else if (latestUser) {
-      setCard({
-        title: 'Question saved',
-        body: 'This shared chat does not have a coach response yet.',
-      });
-      setCardOpen(true);
-      setPhase('answer');
-    } else if (visibleMessages.length === 0) {
-      setCard({
-        title: 'New conversation',
-        body: 'Ask about this page to start a shared StudyPilot chat.',
-      });
-      setPhase('idle');
-    }
+    const presentation = presentCanonicalChat(messages);
+    setChatMessages(presentation.messages);
+    setTranscript(presentation.transcript);
+    setLastQuestion(presentation.lastQuestion);
+    setCard(presentation.card);
+    if (presentation.messages.length > 0) setCardOpen(true);
+    setPhase(presentation.phase);
   }
 
   async function selectDashboardChat(chatId: string | null) {
