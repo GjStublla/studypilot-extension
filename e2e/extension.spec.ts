@@ -146,6 +146,9 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
           return box.y >= 0 && box.y + box.height <= viewport.height;
         }, { timeout: 3_000 })
         .toBe(true);
+      // The panel body uses a staggered reveal. Capture after it settles so
+      // visual evidence reflects the usable state rather than mid-animation.
+      await page.waitForTimeout(800);
 
       const panel = await shadowBoundingBox(page, DIALOG);
       const metrics = await shadowLayoutMetrics(page, DIALOG);
