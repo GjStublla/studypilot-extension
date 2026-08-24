@@ -26,7 +26,6 @@ import {
   SlidersHorizontal,
   ThumbsDown,
   ThumbsUp,
-  Timer,
   Volume2,
   X,
 } from 'lucide-react';
@@ -61,18 +60,13 @@ import {
   type StudyTranscriptTurn,
 } from '@/shared/types';
 import {
-  ExplainGlyph,
   FlashcardViewer,
-  FlashcardsGlyph,
   MenuItem,
   Orb,
-  QuizGlyph,
   QuizViewer,
-  QuickChip,
   RoundButton,
   SettingsSheet,
   SparkleLogo,
-  SummarizeGlyph,
   type FlashcardItem,
   type OrbState,
   type QuizItem,
@@ -81,6 +75,7 @@ import {
 export { SettingsSheet } from './PanelComponents';
 import { useLiveCoaching } from './useLiveCoaching';
 import { presentCanonicalChat, resolveSharedChatId } from './dashboardChatState';
+import { QuickActions } from './QuickActions';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -2047,39 +2042,16 @@ export function FloatingStudyPilot({
               </div>{/* end paste-zone */}
 
               <motion.div className="sp-chips" variants={sectionReveal}>
-                <QuickChip label="Summarize" onClick={() => void runStudyAction('summarize')}>
-                  <SummarizeGlyph />
-                </QuickChip>
-                <QuickChip label="Explain" onClick={() => void runStudyAction('explain')}>
-                  <ExplainGlyph />
-                </QuickChip>
-                <QuickChip label="Quiz Me" onClick={() => void openStudyMode('quiz')}>
-                  <QuizGlyph />
-                </QuickChip>
-                <QuickChip label="Flashcards" onClick={() => void openStudyMode('flashcards')}>
-                  <FlashcardsGlyph />
-                </QuickChip>
-                {sharedContext?.sessions[0] ? (
-                  <QuickChip
-                    label="Continue session"
-                    onClick={() => void continueDashboardSession(sharedContext.sessions[0])}
-                  >
-                    <BookmarkCheck size={14} strokeWidth={2.2} />
-                  </QuickChip>
-                ) : null}
-                {pomodoroRemaining !== null ? (
-                  <QuickChip label={`⏱ ${formatTime(pomodoroRemaining)}`} onClick={stopPomodoro}>
-                    <span className="sp-chip-icon" aria-hidden="true" style={{ background: 'linear-gradient(135deg,#f97316,#ef4444)', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <X size={12} strokeWidth={2.5} color="#fff" />
-                    </span>
-                  </QuickChip>
-                ) : (
-                  <QuickChip label="Focus" onClick={() => setPomodoroPickerOpen(v => !v)}>
-                    <span className="sp-chip-icon sp-chip-icon--blue" aria-hidden="true">
-                      <Timer size={14} strokeWidth={2.2} />
-                    </span>
-                  </QuickChip>
-                )}
+                <QuickActions
+                  sharedContext={sharedContext}
+                  pomodoroRemaining={pomodoroRemaining}
+                  formatTime={formatTime}
+                  onRunStudyAction={action => void runStudyAction(action)}
+                  onOpenStudyMode={mode => void openStudyMode(mode)}
+                  onContinueSession={session => void continueDashboardSession(session)}
+                  onStopPomodoro={stopPomodoro}
+                  onTogglePomodoroPicker={() => setPomodoroPickerOpen(value => !value)}
+                />
               </motion.div>
 
               {activeChat && chatMessages.length > 0 ? (
