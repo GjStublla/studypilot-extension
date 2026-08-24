@@ -10,7 +10,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   webServer: {
-    command: 'node e2e/serve-fixture.mjs',
+    command: 'npm run build:e2e && node e2e/serve-fixture.mjs',
     url: 'http://127.0.0.1:4177/',
     reuseExistingServer: !process.env.CI,
     timeout: 20_000,

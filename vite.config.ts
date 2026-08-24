@@ -17,7 +17,7 @@ function isLoopbackUrl(value: string | undefined): boolean {
 }
 
 export default defineConfig(({ mode }) => {
-  const localBuild = mode === 'studypilot-local';
+  const localBuild = mode === 'studypilot-local' || mode === 'studypilot-e2e';
   const env = loadEnv(mode, process.cwd(), 'VITE_');
 
   if (

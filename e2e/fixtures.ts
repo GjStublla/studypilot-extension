@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { waitForShadow } from './shadow';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const extensionPath = path.join(root, 'dist');
+const extensionPath = path.join(root, 'dist-local');
 
 export const test = base.extend<{
   context: BrowserContext;
@@ -14,7 +14,7 @@ export const test = base.extend<{
   context: async ({}, use) => {
     if (!existsSync(path.join(extensionPath, 'manifest.json'))) {
       throw new Error(
-        'dist/manifest.json is missing. Run npm run build before npm run test:e2e.',
+        'dist-local/manifest.json is missing. The Playwright web server builds the e2e package automatically; run npm run build:e2e before debugging locally.',
       );
     }
 
@@ -94,17 +94,23 @@ export async function togglePanelFromExtension(
 export async function seedFixtureSession(
   context: BrowserContext,
   extensionId: string,
+  activeChatId?: string,
 ): Promise<void> {
   await withExtensionPage(context, extensionId, (extPage) =>
-    extPage.evaluate(async () => {
-      await chrome.storage.local.set({
+    extPage.evaluate(async (chatId) => {
+      const session = {
+        access_token: 'e2e.e2e.e2e',
+        user_id: 'e2e-user',
+        email: 'e2e@studypilot.test',
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+      };
+      const values: Record<string, unknown> = {
         studypilot_supabase_access_session: {
-          access_token: 'e2e.e2e.e2e',
-          user_id: 'e2e-user',
-          email: 'e2e@studypilot.test',
-          expires_at: Math.floor(Date.now() / 1000) + 3600,
+          ...session,
         },
-      });
-    }),
+      };
+      if (chatId) values[`studypilot_active_chat:e2e-user`] = chatId;
+      await chrome.storage.local.set(values);
+    }, activeChatId),
   );
 }

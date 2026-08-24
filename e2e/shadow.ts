@@ -136,6 +136,31 @@ export async function shadowText(page: Page, selector: string): Promise<string> 
   }
 }
 
+export async function fillShadow(page: Page, selector: string, value: string): Promise<void> {
+  const handle = await waitForShadow(page, selector);
+  try {
+    const resolved = await handle.session.send('DOM.resolveNode', { nodeId: handle.nodeId });
+    const objectId = resolved.object.objectId;
+    if (!objectId) throw new Error(`No remote object for ${selector}`);
+    await handle.session.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function(nextValue) {
+        const prototype = this instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        setter?.call(this, nextValue);
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+      }`,
+      arguments: [{ value }],
+      returnByValue: true,
+    });
+  } finally {
+    await handle.session.detach().catch(() => undefined);
+  }
+}
+
 export async function shadowBoundingBox(
   page: Page,
   selector: string,

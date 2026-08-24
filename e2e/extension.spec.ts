@@ -8,6 +8,7 @@ import {
 } from './fixtures';
 import {
   clickShadow,
+  fillShadow,
   shadowChecked,
   shadowBoundingBox,
   shadowExists,
@@ -27,6 +28,7 @@ const CONNECT = 'button.sp-login-btn';
 const DASHBOARD = 'button.sp-dashboard-link';
 const STATUS = '.sp-status';
 const PAGE_URL_TOGGLE = 'label.sp-toggle:has(input[name="pageUrl"])';
+const CHAT_ID = '11111111-1111-4111-8111-111111111111';
 
 async function denyMicrophone(page: Page) {
   const origin = new URL(page.url()).origin;
@@ -196,5 +198,47 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await opened.waitForLoadState('domcontentloaded');
     expect(opened.url().length).toBeGreaterThan(8);
     expect(opened.url()).not.toMatch(/^chrome-extension:/);
+  });
+
+  test('connected shared chat commits coaching and survives panel reload', async ({
+    context,
+    extensionId,
+  }) => {
+    await seedFixtureSession(context, extensionId, CHAT_ID);
+    const page = await openFixturePage(context);
+    await clickShadow(page, LAUNCHER);
+    await waitForShadow(page, 'input[aria-label="Ask a question"]');
+    await waitForShadow(page, `select[aria-label="Shared StudyPilot chat"] option[value="${CHAT_ID}"]`);
+    await clickShadow(page, 'select[aria-label="Shared StudyPilot chat"]');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => shadowText(page, 'select[aria-label="Shared StudyPilot chat"]'), { timeout: 10_000 })
+      .toContain('Biology rubric chat');
+
+    await fillShadow(page, 'input[aria-label="Ask a question"]', 'How should I use the rubric evidence?');
+    await clickShadow(page, 'button[aria-label="Send question"]');
+    await expect
+      .poll(() => shadowText(page, '.sp-card-body'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
+    await clickShadow(page, 'button[aria-label="Refresh shared chats"]');
+
+    await expect
+      .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
+
+    await clickShadow(page, 'button[aria-label="Minimize"]');
+    await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
+    await clickShadow(page, LAUNCHER);
+    await expect
+      .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForShadow(page, LAUNCHER);
+    await clickShadow(page, LAUNCHER);
+    await expect
+      .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
   });
 });
