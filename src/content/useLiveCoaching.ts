@@ -210,9 +210,7 @@ export function useLiveCoaching({
     }
     if (liveBusy) {
       void pauseLiveSession();
-      return;
     }
-    setPaused(value => !value);
   }
 
   useEffect(() => () => {

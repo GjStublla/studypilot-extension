@@ -250,12 +250,14 @@ export function Orb({ state }: { state: OrbState }) {
 
 export function RoundButton({
   active,
+  disabled = false,
   tinted = false,
   label,
   onClick,
   children,
 }: {
   active: boolean;
+  disabled?: boolean;
   tinted?: boolean;
   label: string;
   onClick: () => void;
@@ -267,6 +269,7 @@ export function RoundButton({
       className="sp-round"
       data-active={active}
       data-tinted={tinted}
+      disabled={disabled}
       aria-label={label}
       title={label}
       onClick={onClick}

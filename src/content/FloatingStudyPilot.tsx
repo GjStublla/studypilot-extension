@@ -1929,6 +1929,7 @@ export function FloatingStudyPilot({
                 </RoundButton>
                 <RoundButton
                   active={paused || liveState === 'paused'}
+                  disabled={!liveBusy}
                   label={paused || liveState === 'paused' ? 'Resume session' : 'Pause session'}
                   onClick={togglePause}
                 >
