@@ -42,7 +42,6 @@ import {
 import { defaultPromptForAction, titleForAction } from '@/shared/studyActions';
 import {
   DEFAULT_CONTEXT_SHARE_SETTINGS,
-  sessionPrivacyFromContext,
   type CoachingImage,
   type CoachingRequest,
   type CoachingResponse,
@@ -53,8 +52,6 @@ import {
   type DashboardSessionSummary,
   type ExtensionAuthSession,
   type ExtensionAuthState,
-  type LiveSessionStatus,
-  type LiveUiState,
   type PageContext,
   type SharedChatContext,
   type StudyAction,
@@ -82,7 +79,7 @@ import {
   type StructuredCard,
 } from './PanelComponents';
 export { SettingsSheet } from './PanelComponents';
-import { controlsFromLiveStatus, isLiveBusyState } from './liveCoachingState';
+import { useLiveCoaching } from './useLiveCoaching';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -252,11 +249,6 @@ export function FloatingStudyPilot({
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const [micOn, setMicOn] = useState(false);
-  const [paused, setPaused] = useState(false);
-  const [liveState, setLiveState] = useState<LiveUiState>('idle');
-  const [liveFrozen, setLiveFrozen] = useState(false);
-  const [liveFallback, setLiveFallback] = useState<'text-coaching' | null>(null);
   const [phase, setPhase] = useState<StudyPhase>('idle');
   const [notice, setNotice] = useState<string | null>(null);
   const [authState, setAuthState] = useState<ExtensionAuthState | null>(null);
@@ -303,6 +295,24 @@ export function FloatingStudyPilot({
   const [context, setContext] = useState<ContextShareSettings>(
     DEFAULT_CONTEXT_SHARE_SETTINGS,
   );
+
+  const {
+    liveState,
+    liveFrozen,
+    liveFallback,
+    micOn,
+    paused,
+    liveBusy,
+    applyLiveStatus,
+    toggleMic,
+    togglePause,
+  } = useLiveCoaching({
+    activeChatId,
+    context,
+    flashNotice,
+    onVoiceQuestion: (voiceQuestion) => void runStudyAction('explain', voiceQuestion, true),
+    sendRuntimeMessage,
+  });
 
   // ── Drag-to-reposition ───────────────────────────────────────────────────────
   // null = use default CSS (bottom-right). Once the user drags, we switch to
@@ -619,7 +629,6 @@ export function FloatingStudyPilot({
     return () => {
       if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-      recognitionRef.current?.stop();
     };
   }, []);
 
@@ -793,7 +802,6 @@ export function FloatingStudyPilot({
   }
 
   const activeChat = sharedContext?.chats.find(chat => chat.id === activeChatId) ?? null;
-  const liveBusy = isLiveBusyState(liveState);
   const isActiveChatSending = activeChatId !== null && inFlightChatIds.has(activeChatId);
   const orbState: OrbState =
     isActiveChatSending || phase === 'thinking' || liveState === 'connecting' || liveState === 'starting'
@@ -831,19 +839,6 @@ export function FloatingStudyPilot({
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     setNotice(text);
     noticeTimer.current = window.setTimeout(() => setNotice(null), duration);
-  }
-
-  function applyLiveStatus(status: LiveSessionStatus) {
-    const controls = controlsFromLiveStatus(status);
-    setLiveState(status.state);
-    setLiveFrozen(controls.liveFrozen);
-    setLiveFallback(controls.liveFallback);
-    setMicOn(controls.micOn);
-    setPaused(controls.paused);
-    if (status.warning) flashNotice(status.warning, 3600);
-    if (status.error && status.state === 'error') {
-      flashNotice(status.error, 4200);
-    }
   }
 
   function elapsedSeconds() {
@@ -1586,166 +1581,13 @@ export function FloatingStudyPilot({
     window.setTimeout(() => setCopied(false), 1600);
   }
 
-  // Web Speech API recognition instance — kept in a ref so start/stop
-  // work across renders without creating multiple instances.
-  const recognitionRef = useRef<any>(null);
   // Hidden file input for the "pick from file explorer" flow
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => {
-    recognitionRef.current?.stop();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
   }, []);
-
-  function toggleMic() {
-    if (liveBusy && liveState !== 'paused') {
-      void stopLiveSession();
-      return;
-    }
-    if (liveState === 'paused') {
-      void resumeLiveSession();
-      return;
-    }
-    void startLiveSession();
-  }
-
-  async function startLiveSession() {
-    if (!activeChatId) {
-      startSpeechRecognition();
-      return;
-    }
-    try {
-      setMicOn(true);
-      setPaused(false);
-      setLiveFallback(null);
-      const response = await sendRuntimeMessage<LiveSessionStatus>({
-        type: 'STUDYPILOT_LIVE_START',
-        payload: {
-          chatId: activeChatId,
-          privacy: sessionPrivacyFromContext(context),
-        },
-      });
-      if (response) applyLiveStatus(response);
-      else {
-        setMicOn(false);
-        flashNotice('Open the extension build for live coach');
-      }
-    } catch (error) {
-      setMicOn(false);
-      setLiveFallback('text-coaching');
-      const message = error instanceof Error ? error.message : 'Live coach unavailable';
-      flashNotice(
-        message.includes('connected')
-          ? 'Connect dashboard first'
-          : `${message} — use text coaching instead`,
-        4200,
-      );
-      startSpeechRecognition();
-    }
-  }
-
-  async function stopLiveSession() {
-    try {
-      const response = await sendRuntimeMessage<LiveSessionStatus>({
-        type: 'STUDYPILOT_LIVE_STOP',
-      });
-      if (response) applyLiveStatus(response);
-      else {
-        setMicOn(false);
-        setPaused(false);
-        setLiveState('idle');
-        setLiveFrozen(false);
-      }
-    } catch (error) {
-      flashNotice(error instanceof Error ? error.message : 'Could not stop Live', 3200);
-    }
-  }
-
-  async function pauseLiveSession() {
-    try {
-      const response = await sendRuntimeMessage<LiveSessionStatus>({
-        type: 'STUDYPILOT_LIVE_PAUSE',
-      });
-      if (response) applyLiveStatus(response);
-      else setPaused(true);
-    } catch {
-      flashNotice('Could not pause Live', 2600);
-    }
-  }
-
-  async function resumeLiveSession() {
-    try {
-      const response = await sendRuntimeMessage<LiveSessionStatus>({
-        type: 'STUDYPILOT_LIVE_RESUME',
-      });
-      if (response) applyLiveStatus(response);
-      else {
-        setPaused(false);
-        setMicOn(true);
-      }
-    } catch {
-      flashNotice('Could not resume Live', 2600);
-    }
-  }
-
-  function startSpeechRecognition() {
-    if (micOn) {
-      // Stop listening
-      recognitionRef.current?.stop();
-      setMicOn(false);
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      flashNotice('Voice input is not supported in this browser.', 3000);
-      return;
-    }
-
-    const recognition: any = new SpeechRecognition();
-    recognition.continuous = false;      // stop after first utterance
-    recognition.interimResults = false;  // only final results
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setMicOn(true);
-      setPaused(false);
-      flashNotice('Listening…', 8000);
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
-      if (transcript) {
-        setMicOn(false);
-        flashNotice(`"${transcript.slice(0, 40)}${transcript.length > 40 ? '…' : ''}"`, 2000);
-        void runStudyAction('explain', transcript, true);
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      setMicOn(false);
-      if (event.error === 'not-allowed') {
-        flashNotice('Microphone access denied. Allow it in Chrome settings.', 4000);
-      } else if (event.error !== 'no-speech') {
-        flashNotice('Voice input failed. Try again.', 3000);
-      }
-    };
-
-    recognition.onend = () => {
-      setMicOn(false);
-    };
-
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch {
-      flashNotice('Could not start voice input. Try again.', 3000);
-      setMicOn(false);
-    }
-  }
 
   return (
     <>
@@ -2124,17 +1966,7 @@ export function FloatingStudyPilot({
                 <RoundButton
                   active={paused || liveState === 'paused'}
                   label={paused || liveState === 'paused' ? 'Resume session' : 'Pause session'}
-                  onClick={() => {
-                    if (liveState === 'paused') {
-                      void resumeLiveSession();
-                      return;
-                    }
-                    if (liveBusy) {
-                      void pauseLiveSession();
-                      return;
-                    }
-                    setPaused(value => !value);
-                  }}
+                  onClick={togglePause}
                 >
                   {paused || liveState === 'paused'
                     ? <CirclePlay size={20} strokeWidth={1.75} />
