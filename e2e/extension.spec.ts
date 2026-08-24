@@ -315,6 +315,18 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await expect
       .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
       .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
+
+    // A second complete coaching turn after the persisted reload must reuse the
+    // same active chat instead of creating a duplicate or dropping the commit.
+    await fillShadow(page, 'input[aria-label="Ask a question"]', 'What should I check next?');
+    await clickShadow(page, 'button[aria-label="Send question"]');
+    await expect
+      .poll(() => shadowText(page, '.sp-card-body'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
+    await clickShadow(page, 'button[aria-label="Refresh shared chats"]');
+    await expect
+      .poll(() => shadowText(page, '.sp-chat-history'), { timeout: 10_000 })
+      .toContain('Grounded response: compare the claim with the rubric evidence before revising.');
   });
 
   test('live start/stop survives panel unmount without stale errors', async ({
