@@ -572,6 +572,8 @@ export async function stopLive(
 }
 
 export async function pauseLive(): Promise<SwToPanelLiveMessage> {
+  if (live.state !== 'live') return statusMessage();
+
   const operationId = ++live.operationId;
   await sendToOffscreen({ type: 'OFFSCREEN_PAUSE' });
   if (!isCurrentOperation(operationId)) return statusMessage();
@@ -581,6 +583,8 @@ export async function pauseLive(): Promise<SwToPanelLiveMessage> {
 }
 
 export async function resumeLive(): Promise<SwToPanelLiveMessage> {
+  if (live.state !== 'paused') return statusMessage();
+
   const operationId = ++live.operationId;
   await sendToOffscreen({ type: 'OFFSCREEN_RESUME' });
   if (!isCurrentOperation(operationId)) return statusMessage();

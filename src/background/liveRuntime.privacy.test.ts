@@ -4,6 +4,8 @@ import { parseLiveStartPayload } from '@/shared/extensionMessages';
 import { DEFAULT_SESSION_PRIVACY } from '@/shared/types';
 import {
   isCurrentLiveRuntimeOperation,
+  pauseLive,
+  resumeLive,
   startLive,
   stopLive,
 } from './liveRuntime';
@@ -223,5 +225,21 @@ describe('startLive privacy propagation', () => {
       .map(([message]) => message as { type?: string; state?: string })
       .filter(message => message.type === 'STUDYPILOT_LIVE_STATUS');
     expect(statusMessages.some(message => message.state === 'error')).toBe(false);
+  });
+
+  it('rejects pause and resume commands while the runtime is idle', async () => {
+    const { sendMessage } = installChrome();
+
+    const paused = await pauseLive();
+    const resumed = await resumeLive();
+
+    expect(paused.state).toBe('idle');
+    expect(resumed.state).toBe('idle');
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'OFFSCREEN_PAUSE' }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'OFFSCREEN_RESUME' }),
+    );
   });
 });
