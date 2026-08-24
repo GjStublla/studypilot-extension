@@ -13,6 +13,7 @@ import {
   shadowChecked,
   shadowBoundingBox,
   shadowExists,
+  shadowInteractiveAudit,
   shadowLayoutMetrics,
   shadowText,
   waitForShadow,
@@ -102,6 +103,22 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     await focusShadow(page, 'button[aria-label="Minimize"]');
     await page.keyboard.press('Enter');
     await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
+  });
+
+  test('visible panel controls are named, focusable, and not clipped', async ({
+    context,
+    extensionId,
+  }) => {
+    await seedFixtureSession(context, extensionId);
+    const page = await openFixturePage(context);
+    await clickShadow(page, LAUNCHER);
+    await waitForShadow(page, DIALOG);
+
+    const controls = (await shadowInteractiveAudit(page)).filter(control => control.visible);
+    expect(controls.length).toBeGreaterThan(0);
+    expect(controls.every(control => control.label.length > 0)).toBe(true);
+    expect(controls.filter(control => !control.disabled).every(control => control.tabIndex >= 0)).toBe(true);
+    expect(controls.every(control => !control.clipped)).toBe(true);
   });
 
   test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {

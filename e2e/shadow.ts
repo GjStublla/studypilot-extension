@@ -231,3 +231,75 @@ export async function shadowLayoutMetrics(
     await found.session.detach().catch(() => undefined);
   }
 }
+
+export type ShadowInteractiveAudit = {
+  tagName: string;
+  role: string;
+  label: string;
+  tabIndex: number;
+  disabled: boolean;
+  visible: boolean;
+  clipped: boolean;
+};
+
+/**
+ * Inspect the visible native controls inside the closed extension shadow root.
+ * This keeps accessibility characterization in the same CDP boundary as the
+ * other shadow-root helpers instead of weakening the production encapsulation.
+ */
+export async function shadowInteractiveAudit(page: Page): Promise<ShadowInteractiveAudit[]> {
+  const session = await page.context().newCDPSession(page);
+  await session.send('DOM.enable');
+  await session.send('Runtime.enable');
+  try {
+    const rootId = await shadowRootNodeId(page, session);
+    const resolved = await session.send('DOM.resolveNode', { nodeId: rootId });
+    const objectId = resolved.object.objectId;
+    if (!objectId) throw new Error('No remote object for the StudyPilot shadow root');
+    const result = await session.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        const controls = this.querySelectorAll(
+          'button, select, textarea, input:not([type="checkbox"]), [role="button"], [role="menuitem"]',
+        );
+        const visible = (element) => {
+          const style = getComputedStyle(element);
+          const rect = element.getBoundingClientRect();
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+        };
+        const labelFor = (element) => {
+          const ariaLabel = element.getAttribute('aria-label')?.trim();
+          if (ariaLabel) return ariaLabel;
+          const labelledBy = element.getAttribute('aria-labelledby')
+            ?.split(/\\s+/)
+            .map((id) => this.getElementById(id)?.textContent?.trim())
+            .filter(Boolean)
+            .join(' ');
+          if (labelledBy) return labelledBy;
+          const title = element.getAttribute('title')?.trim();
+          if (title) return title;
+          return (element.innerText || element.textContent || '').replace(/\\s+/g, ' ').trim();
+        };
+        return Array.from(controls).map((element) => {
+          const isVisible = visible(element);
+          const visibleText = (element.innerText || '').replace(/\\s+/g, ' ').trim();
+          return {
+            tagName: element.tagName.toLowerCase(),
+            role: element.getAttribute('role') || '',
+            label: labelFor(element),
+            tabIndex: element.tabIndex,
+            disabled: Boolean(element.disabled),
+            visible: isVisible,
+            // Icon-only controls use their aria-label as the accessible name,
+            // so their SVG box can legitimately exceed the text box metrics.
+            clipped: isVisible && visibleText.length > 0 && element.scrollWidth > element.clientWidth + 1,
+          };
+        });
+      }`,
+      returnByValue: true,
+    });
+    return (result.result.value ?? []) as ShadowInteractiveAudit[];
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}
