@@ -109,4 +109,48 @@ describe('PerChatSessionSaveQueue', () => {
     releases.shift()?.();
     await Promise.all([finalize, newerSave]);
   });
+
+  it('runs different chats independently while reporting aggregate busy state', async () => {
+    const busyStates: boolean[] = [];
+    const queue = new PerChatSessionSaveQueue<TestSave>(busy => busyStates.push(busy));
+    const releases: Array<() => void> = [];
+    const calls: string[] = [];
+    const execute = (save: TestSave) => new Promise<void>(resolve => {
+      calls.push(save.chatId);
+      releases.push(resolve);
+    });
+
+    const first = queue.enqueue({ chatId: 'chat-a', finalize: false, transcript: ['a'] }, execute);
+    const second = queue.enqueue({ chatId: 'chat-b', finalize: false, transcript: ['b'] }, execute);
+
+    expect(calls).toEqual(['chat-a', 'chat-b']);
+    expect(busyStates).toEqual([true, true]);
+
+    releases.shift()?.();
+    releases.shift()?.();
+    await Promise.all([first, second]);
+    expect(busyStates.at(-1)).toBe(false);
+  });
+
+  it('drains pending saves after an executor error and rejects the shared drain', async () => {
+    const queue = new PerChatSessionSaveQueue<TestSave>();
+    const calls: TestSave[] = [];
+    let attempt = 0;
+    const execute = async (save: TestSave) => {
+      calls.push(save);
+      attempt += 1;
+      if (attempt === 1) throw new Error('save failed');
+    };
+
+    const first = queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['first'] }, execute);
+    const second = queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['second'] }, execute);
+
+    await expect(first).rejects.toThrow('save failed');
+    await expect(second).rejects.toThrow('save failed');
+    expect(calls.map(save => save.transcript)).toEqual([['first'], ['second']]);
+
+    await expect(
+      queue.enqueue({ chatId: 'chat-1', finalize: false, transcript: ['recovery'] }, execute),
+    ).resolves.toBeUndefined();
+  });
 });
