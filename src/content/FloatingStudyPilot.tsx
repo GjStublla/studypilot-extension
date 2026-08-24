@@ -1,7 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowLeft,
-  BookmarkCheck,
   Camera,
   Check,
   ChevronDown,
@@ -9,16 +8,12 @@ import {
   CirclePlay,
   Copy,
   Crown,
-  ExternalLink,
   Headphones,
   HelpCircle,
   Layers,
   Lightbulb,
   Mic,
   MicOff,
-  Minus,
-  MoreVertical,
-  Pin,
   Plus,
   RefreshCw,
   Send,
@@ -55,7 +50,6 @@ import {
 } from '@/shared/types';
 import {
   FlashcardViewer,
-  MenuItem,
   Orb,
   QuizViewer,
   RoundButton,
@@ -70,6 +64,7 @@ export { SettingsSheet } from './PanelComponents';
 import { useLiveCoaching } from './useLiveCoaching';
 import { QuickActions } from './QuickActions';
 import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWorkspace';
+import { ExtensionPanel } from './ExtensionPanel';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -1384,144 +1379,31 @@ export function FloatingStudyPilot({
 
         <AnimatePresence>
           {isOpen ? (
-            <motion.section
+            <ExtensionPanel
               key="panel"
-              className="sp-panel"
-            role="dialog"
-            aria-label="Study Pilot"
-            style={panelSize ? { width: panelSize.w, height: panelSize.h } : undefined}
-            initial={{ opacity: 0, y: 26, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.98 }}
-            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <header
-              className="sp-header"
-              onPointerDown={onHeaderPointerDown}
-              onPointerMove={onHeaderPointerMove}
-              onPointerUp={onHeaderPointerUp}
-              data-dragging={isDragging.current}
+              panelSize={panelSize}
+              isPinned={isPinned}
+              menuOpen={menuOpen}
+              isSaving={isSaving}
+              personality={personality}
+              streak={streak}
+              isDragging={isDragging.current}
+              onHeaderPointerDown={onHeaderPointerDown}
+              onHeaderPointerMove={onHeaderPointerMove}
+              onHeaderPointerUp={onHeaderPointerUp}
+              onMinimize={() => setIsOpen(false)}
+              onTogglePinned={() => setIsPinned(value => !value)}
+              onToggleMenu={() => setMenuOpen(value => !value)}
+              onCapture={() => void captureAndAttach()}
+              onSave={() => void saveToDashboard()}
+              onOpenDashboard={() => void openDashboard()}
+              onPersonalityChange={value => {
+                setPersonality(value);
+                if (typeof chrome !== 'undefined' && chrome.storage) {
+                  chrome.storage.local.set({ personality: value }).catch(() => {});
+                }
+              }}
             >
-              <div className="sp-brand">
-                <SparkleLogo size={30} />
-                <strong>Study Pilot</strong>
-                {streak > 0 && (
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    background: 'linear-gradient(135deg,#f97316,#ef4444)',
-                    color: '#fff',
-                    borderRadius: '99px',
-                    padding: '1px 7px',
-                    marginLeft: '4px',
-                    letterSpacing: '0.02em',
-                  }}>
-                    🔥 {streak}d
-                  </span>
-                )}
-              </div>
-              <div className="sp-header-actions">
-                <button
-                  type="button"
-                  className="sp-icon-button"
-                  aria-label="Minimize"
-                  title="Minimize"
-                  onClick={() => setIsOpen(false)}
-                >
-                  <Minus size={18} strokeWidth={2} />
-                </button>
-                <button
-                  type="button"
-                  className="sp-icon-button"
-                  data-active={isPinned}
-                  aria-label={isPinned ? 'Unpin Study Pilot' : 'Pin Study Pilot'}
-                  aria-pressed={isPinned}
-                  onClick={() => setIsPinned(value => !value)}
-                >
-                  <Pin size={19} strokeWidth={1.9} />
-                </button>
-                <button
-                  type="button"
-                  className="sp-icon-button"
-                  aria-label="More options"
-                  aria-expanded={menuOpen}
-                  onClick={() => setMenuOpen(value => !value)}
-                >
-                  <MoreVertical size={20} strokeWidth={2} />
-                </button>
-              </div>
-
-              <AnimatePresence>
-                {menuOpen ? (
-                  <>
-                    <button
-                      type="button"
-                      className="sp-menu-backdrop"
-                      aria-label="Close menu"
-                      onClick={() => setMenuOpen(false)}
-                    />
-                    <motion.div
-                      className="sp-menu"
-                      role="menu"
-                      initial={{ opacity: 0, y: -6, scale: 0.98 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                      transition={{ duration: 0.14 }}
-                    >
-                      <MenuItem
-                        icon={<Camera size={16} />}
-                        label="Capture tab screenshot"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          void captureAndAttach();
-                        }}
-                      />
-                      <MenuItem
-                        icon={<BookmarkCheck size={16} />}
-                        label={isSaving ? 'Saving…' : 'Save to dashboard'}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          void saveToDashboard();
-                        }}
-                      />
-                      <MenuItem
-                        icon={<ExternalLink size={16} />}
-                        label="Open dashboard"
-                        onClick={() => {
-                          setMenuOpen(false);
-                          void openDashboard();
-                        }}
-                      />
-
-                      <div style={{ height: 1, background: 'rgba(255,255,255,0.1)', margin: '4px 0' }} />
-                      <div style={{ padding: '6px 12px', fontSize: '11px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                        AI Personality
-                      </div>
-                      {['Default', 'Strict Tutor', 'Supportive Friend', 'Socratic Guide', 'Gen Z'].map((p) => (
-                        <button
-                          key={p}
-                          type="button"
-                          className="sp-menu-item"
-                          onClick={() => {
-                            setPersonality(p);
-                            if (typeof chrome !== 'undefined' && chrome.storage) {
-                              chrome.storage.local.set({ personality: p }).catch(() => {});
-                            }
-                            setMenuOpen(false);
-                          }}
-                        >
-                          <span className="sp-menu-item-icon">
-                            {personality === p ? <Check size={16} color="#10b981" /> : <span style={{ width: 16 }} />}
-                          </span>
-                          {p}
-                        </button>
-                      ))}
-
-                    </motion.div>
-                  </>
-                ) : null}
-              </AnimatePresence>
-            </header>
 
             <motion.div
               className="sp-body"
@@ -2021,7 +1903,7 @@ export function FloatingStudyPilot({
               onPointerMove={onResizePointerMove}
               onPointerUp={onResizePointerUp}
             />
-          </motion.section>
+          </ExtensionPanel>
         ) : null}
       </AnimatePresence>
     </div>
