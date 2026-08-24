@@ -1,11 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Camera,
-  Check,
-  ChevronDown,
   CirclePause,
   CirclePlay,
-  Copy,
   Crown,
   Headphones,
   HelpCircle,
@@ -15,13 +12,9 @@ import {
   MicOff,
   Send,
   SlidersHorizontal,
-  ThumbsDown,
-  ThumbsUp,
-  Volume2,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import {
   isLiveFanoutMessage,
@@ -45,9 +38,7 @@ import {
   type StudyTranscriptTurn,
 } from '@/shared/types';
 import {
-  FlashcardViewer,
   Orb,
-  QuizViewer,
   RoundButton,
   SparkleLogo,
   type FlashcardItem,
@@ -55,6 +46,7 @@ import {
   type QuizItem,
   type StructuredCard,
 } from './PanelComponents';
+import { AnswerCardPanel, type AnswerCardData } from './AnswerCardPanel';
 import { SettingsSheet } from './ContextSettings';
 export { SettingsSheet } from './ContextSettings';
 import { useLiveCoaching } from './useLiveCoaching';
@@ -66,12 +58,6 @@ import { StudyModePanel } from './StudyModePanel';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
-
-interface AnswerCard {
-  title: string;
-  body: string;
-  action?: StudyAction;
-}
 
 interface SaveSessionOptions {
   chatId?: string;
@@ -143,7 +129,7 @@ export function FloatingStudyPilot({
   const [page, setPage] = useState<PageContext>(() => getPageContext());
   const [question, setQuestion] = useState('');
   const [lastQuestion, setLastQuestion] = useState('');
-  const [card, setCard] = useState<AnswerCard>({
+  const [card, setCard] = useState<AnswerCardData>({
     title: 'Ready to coach',
     body: 'Ask about this page, summarize it, or save a session once the extension is connected.',
   });
@@ -1701,95 +1687,20 @@ export function FloatingStudyPilot({
                 ) : null}
               </AnimatePresence>
 
-              <motion.section
-                className="sp-card"
-                variants={sectionReveal}
-                data-thinking={phase === 'thinking'}
-              >
-                <button
-                  type="button"
-                  className="sp-card-head"
-                  aria-expanded={cardOpen}
-                  onClick={() => setCardOpen(value => !value)}
-                >
-                  <strong>{card.title}</strong>
-                  <span className="sp-card-time">Just now</span>
-                  <ChevronDown
-                    size={20}
-                    className="sp-card-chevron"
-                    data-open={cardOpen}
-                    aria-hidden="true"
-                  />
-                </button>
-
-                <AnimatePresence initial={false}>
-                  {cardOpen ? (
-                    <motion.div
-                      key="card-body"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                    >
-                      {structuredCard?.type === 'flashcards' ? (
-                        <FlashcardViewer items={structuredCard.items} />
-                      ) : structuredCard?.type === 'quiz' ? (
-                        <QuizViewer items={structuredCard.items} />
-                      ) : (
-                        <p className="sp-card-body">{renderMarkdown(card.body)}</p>
-                      )}
-                      {cardScreenshotDataUrl ? (
-                        <figure className="sp-card-screenshot">
-                          <img
-                            src={cardScreenshotDataUrl}
-                            alt="Screenshot shared with StudyPilot"
-                          />
-                          <figcaption>
-                            <Camera size={13} />
-                            <span>Screenshot shared</span>
-                          </figcaption>
-                        </figure>
-                      ) : null}
-                      <div className="sp-card-actions">
-                        <button
-                          type="button"
-                          aria-label={isSpeaking ? 'Stop reading aloud' : 'Read aloud'}
-                          data-active={isSpeaking}
-                          onClick={speakAnswer}
-                        >
-                          <Volume2 size={19} />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Copy answer"
-                          onClick={() => void copyAnswer()}
-                        >
-                          {copied ? <Check size={19} /> : <Copy size={19} />}
-                        </button>
-                        <span className="sp-card-spacer" />
-                        <button
-                          type="button"
-                          aria-label="Helpful"
-                          data-feedback="up"
-                          data-active={feedback === 'up'}
-                          onClick={() => setFeedback(value => (value === 'up' ? null : 'up'))}
-                        >
-                          <ThumbsUp size={19} />
-                        </button>
-                        <button
-                          type="button"
-                          aria-label="Not helpful"
-                          data-feedback="down"
-                          data-active={feedback === 'down'}
-                          onClick={() => setFeedback(value => (value === 'down' ? null : 'down'))}
-                        >
-                          <ThumbsDown size={19} />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-              </motion.section>
+              <AnswerCardPanel
+                card={card}
+                cardOpen={cardOpen}
+                structuredCard={structuredCard}
+                screenshotDataUrl={cardScreenshotDataUrl}
+                isSpeaking={isSpeaking}
+                copied={copied}
+                feedback={feedback}
+                thinking={phase === 'thinking'}
+                onToggleOpen={() => setCardOpen(value => !value)}
+                onSpeak={speakAnswer}
+                onCopy={copyAnswer}
+                onFeedback={(value) => setFeedback(current => (current === value ? null : value))}
+              />
               </>
             )}
             </motion.div>{/* end sp-body */}
@@ -1939,35 +1850,6 @@ const sectionReveal = {
 // ─── Markdown renderer ────────────────────────────────────────────────────────
 // Converts **bold**, *italic*, and \n line breaks into React nodes.
 // No external dependency — keeps the bundle small.
-
-function renderMarkdown(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const lines = text.split('\n');
-
-  lines.forEach((line, lineIdx) => {
-    if (lineIdx > 0) nodes.push(<br key={`br${lineIdx}`} />);
-
-    // Match **bold** before *italic* so double-asterisk wins
-    const re = /(\*\*(.+?)\*\*|\*(.+?)\*)/g;
-    let cursor = 0;
-    let m: RegExpExecArray | null;
-
-    while ((m = re.exec(line)) !== null) {
-      if (m.index > cursor) nodes.push(line.slice(cursor, m.index));
-
-      if (m[0].startsWith('**')) {
-        nodes.push(<strong key={`b${lineIdx}-${m.index}`}>{m[2]}</strong>);
-      } else {
-        nodes.push(<em key={`i${lineIdx}-${m.index}`}>{m[3]}</em>);
-      }
-      cursor = m.index + m[0].length;
-    }
-
-    if (cursor < line.length) nodes.push(line.slice(cursor));
-  });
-
-  return nodes;
-}
 
 interface StudySessionInput {
   page: PageContext;
