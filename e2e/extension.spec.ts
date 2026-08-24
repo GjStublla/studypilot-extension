@@ -11,6 +11,7 @@ import {
   shadowChecked,
   shadowBoundingBox,
   shadowExists,
+  shadowLayoutMetrics,
   shadowText,
   waitForShadow,
 } from './shadow';
@@ -82,6 +83,11 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
 
   test('rapid open and close keeps one panel host', async ({ context, extensionId }) => {
     const page = await openFixturePage(context);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
     for (let index = 0; index < 4; index += 1) {
       await togglePanelFromExtension(context, extensionId);
       await expect.poll(() => shadowExists(page, DIALOG)).toBe(true);
@@ -89,6 +95,7 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
       await expect.poll(() => shadowExists(page, DIALOG)).toBe(false);
     }
     await expect(page.locator('#studypilot-extension-root')).toHaveCount(1);
+    expect(errors).toEqual([]);
   });
 
   test('privacy defaults keep screenshot and dashboard save off', async ({
@@ -123,7 +130,8 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
     expect(await shadowChecked(page, SAVE)).toBe(false);
   });
 
-  test('panel stays within 360px and 390px viewports', async ({ context }) => {
+  test('panel stays within 360px and 390px viewports', async ({ context, extensionId }) => {
+    await seedFixtureSession(context, extensionId);
     const page = await openFixturePage(context);
     for (const viewport of [{ width: 360, height: 640 }, { width: 390, height: 700 }]) {
       await page.setViewportSize(viewport);
@@ -138,11 +146,18 @@ test.describe('unpacked StudyPilot MV3 extension', () => {
         .toBe(true);
 
       const panel = await shadowBoundingBox(page, DIALOG);
+      const metrics = await shadowLayoutMetrics(page, DIALOG);
+      const quickActions = await shadowText(page, '.sp-chips');
       expect(panel.width).toBeLessThanOrEqual(viewport.width - 24);
       expect(panel.x).toBeGreaterThanOrEqual(0);
       expect(panel.y).toBeGreaterThanOrEqual(0);
       expect(panel.x + panel.width).toBeLessThanOrEqual(viewport.width);
       expect(panel.y + panel.height).toBeLessThanOrEqual(viewport.height);
+      expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+      expect(quickActions).toEqual(expect.stringContaining('Summarize'));
+      expect(quickActions).toEqual(expect.stringContaining('Explain'));
+      expect(quickActions).toEqual(expect.stringContaining('Quiz Me'));
+      expect(quickActions).toEqual(expect.stringContaining('Flashcards'));
     }
   });
 

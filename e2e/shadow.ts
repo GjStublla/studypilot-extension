@@ -158,3 +158,35 @@ export async function shadowBoundingBox(
     await found.session.detach().catch(() => undefined);
   }
 }
+
+export async function shadowLayoutMetrics(
+  page: Page,
+  selector: string,
+): Promise<{ clientWidth: number; scrollWidth: number; clientHeight: number; scrollHeight: number }> {
+  const found = await waitForShadow(page, selector);
+  try {
+    const resolved = await found.session.send('DOM.resolveNode', { nodeId: found.nodeId });
+    const objectId = resolved.object.objectId;
+    if (!objectId) throw new Error(`No remote object for ${selector}`);
+    const result = await found.session.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        return {
+          clientWidth: this.clientWidth,
+          scrollWidth: this.scrollWidth,
+          clientHeight: this.clientHeight,
+          scrollHeight: this.scrollHeight,
+        };
+      }`,
+      returnByValue: true,
+    });
+    return result.result.value as {
+      clientWidth: number;
+      scrollWidth: number;
+      clientHeight: number;
+      scrollHeight: number;
+    };
+  } finally {
+    await found.session.detach().catch(() => undefined);
+  }
+}
