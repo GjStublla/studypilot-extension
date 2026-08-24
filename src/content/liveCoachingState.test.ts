@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { LiveSessionStatus } from '@/shared/types';
-import { controlsFromLiveStatus, isLiveBusyState } from './liveCoachingState';
+import { controlsFromLiveStatus, isLiveBusyState, liveMicIntent } from './liveCoachingState';
 import { isCurrentLiveOperation } from './useLiveCoaching';
 
 const status = (
@@ -21,6 +21,16 @@ describe('live coaching state derivation', () => {
     expect(isLiveBusyState('paused')).toBe(true);
     expect(isLiveBusyState('stopping')).toBe(false);
     expect(isLiveBusyState('error')).toBe(false);
+  });
+
+  it('keeps microphone intents valid during transitions and fallback speech', () => {
+    expect(liveMicIntent('starting', false)).toBe('stop-live');
+    expect(liveMicIntent('connecting', false)).toBe('stop-live');
+    expect(liveMicIntent('live', false)).toBe('stop-live');
+    expect(liveMicIntent('paused', false)).toBe('resume');
+    expect(liveMicIntent('stopping', false)).toBe('ignore');
+    expect(liveMicIntent('error', true)).toBe('stop-speech');
+    expect(liveMicIntent('idle', true)).toBe('stop-speech');
   });
 
   it('preserves microphone, pause, freeze, and fallback semantics', () => {

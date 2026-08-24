@@ -7,11 +7,24 @@ export interface LiveControls {
   paused: boolean;
 }
 
+export type LiveMicIntent = 'start' | 'stop-live' | 'stop-speech' | 'resume' | 'ignore';
+
 export function isLiveBusyState(state: LiveUiState): boolean {
   return state === 'starting'
     || state === 'connecting'
     || state === 'live'
     || state === 'paused';
+}
+
+export function liveMicIntent(
+  state: LiveUiState,
+  recognitionActive: boolean,
+): LiveMicIntent {
+  if (state === 'stopping') return 'ignore';
+  if (recognitionActive) return 'stop-speech';
+  if (isLiveBusyState(state) && state !== 'paused') return 'stop-live';
+  if (state === 'paused') return 'resume';
+  return 'start';
 }
 
 export function controlsFromLiveStatus(status: LiveSessionStatus): LiveControls {

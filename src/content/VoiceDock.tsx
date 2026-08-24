@@ -36,6 +36,7 @@ export function VoiceDock({
     <motion.div className="sp-voice-dock" variants={variants}>
       <RoundButton
         active={micOn && !paused}
+        disabled={liveState === 'stopping'}
         label={micOn ? 'Mute microphone' : 'Unmute microphone'}
         onClick={onToggleMic}
       >
