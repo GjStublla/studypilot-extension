@@ -14,10 +14,7 @@ import {
   Lightbulb,
   Mic,
   MicOff,
-  Plus,
-  RefreshCw,
   Send,
-  ShieldCheck,
   SlidersHorizontal,
   ThumbsDown,
   ThumbsUp,
@@ -65,6 +62,7 @@ import { useLiveCoaching } from './useLiveCoaching';
 import { QuickActions } from './QuickActions';
 import { isDashboardBridgeOrigin, useDashboardWorkspace } from './useDashboardWorkspace';
 import { ExtensionPanel } from './ExtensionPanel';
+import { ChatSwitcher } from './ChatSwitcher';
 
 const LOCAL_PREVIEW_TEXT =
   'Real StudyPilot AI responses are available from the built extension runtime after connecting your dashboard session.';
@@ -1415,62 +1413,20 @@ export function FloatingStudyPilot({
               }}
             >
               {authState?.connected !== false ? (
-                <motion.section className="sp-chat-switcher" variants={sectionReveal}>
-                <label className="sp-chat-select">
-                  <span>Shared chat</span>
-                  <select
-                    aria-label="Shared StudyPilot chat"
-                    value={activeChatId ?? ''}
-                    disabled={liveFrozen || liveBusy}
-                    onChange={event => void selectDashboardChat(event.target.value || null)}
-                  >
-                    <option value="">New chat draft</option>
-                    {(sharedContext?.chats ?? []).map(chat => (
-                      <option key={chat.id} value={chat.id}>
-                        {chat.title}
-                        {chat.rubricTitle
-                          ? ` · ${chat.rubricTitle}${chat.ragReady ? ' ✓' : chat.rubricFileSearchStatus ? ` (${chat.rubricFileSearchStatus})` : ''}`
-                          : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {activeChat?.rubricTitle ? (
-                  <span
-                    className="sp-chat-tool"
-                    title={
-                      activeChat.ragReady
-                        ? `Rubric ready: ${activeChat.rubricTitle}`
-                        : `Rubric: ${activeChat.rubricTitle} (${activeChat.rubricFileSearchStatus ?? 'pending'})`
-                    }
-                    aria-label="Rubric status"
-                  >
-                    <ShieldCheck size={15} data-ready={activeChat.ragReady ? 'true' : 'false'} />
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  className="sp-chat-tool"
-                  aria-label="Create new chat"
-                  title="New chat"
-                  disabled={isCreatingChat || liveFrozen || liveBusy}
-                  onClick={() => {
+                <ChatSwitcher
+                  activeChatId={activeChatId}
+                  activeChat={activeChat}
+                  sharedContext={sharedContext}
+                  disabled={liveFrozen || liveBusy}
+                  isCreatingChat={isCreatingChat}
+                  isRefreshingChats={isRefreshingChats}
+                  variants={sectionReveal}
+                  onSelectChat={chatId => void selectDashboardChat(chatId)}
+                  onCreateChat={() => {
                     void createNewDashboardChat().catch(() => flashNotice('Could not create chat', 2600));
                   }}
-                >
-                  <Plus size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="sp-chat-tool"
-                  aria-label="Refresh shared chats"
-                  title="Refresh chats"
-                  disabled={isRefreshingChats || liveFrozen || liveBusy}
-                  onClick={() => void refreshSharedChatContext(activeChatIdRef.current)}
-                >
-                  <RefreshCw size={15} data-spinning={isRefreshingChats} />
-                </button>
-                </motion.section>
+                  onRefreshChats={() => void refreshSharedChatContext(activeChatIdRef.current)}
+                />
               ) : null}
 
               {/* Show a web-app connect prompt when no session is available */}
