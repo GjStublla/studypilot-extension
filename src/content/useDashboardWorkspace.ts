@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react';
-import { DASHBOARD_URL, STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
+import { STUDYPILOT_CONNECT_MESSAGE } from '@/shared/config';
 import type { StudyPilotRuntimeMessage } from '@/shared/extensionMessages';
 import type {
   DashboardChatMessage,
   DashboardChatSummary,
   DashboardSessionSummary,
-  ExtensionAuthSession,
   ExtensionAuthState,
   SharedChatContext,
 } from '@/shared/types';
@@ -14,12 +13,8 @@ import {
   resolveSharedChatId,
   type CanonicalChatPresentation,
 } from './dashboardChatState';
-
-const ACCESS_KEY = 'sp_access_token';
-const REFRESH_KEY = 'sp_refresh_token';
-const USER_ID_KEY = 'sp_user_id';
-const EMAIL_KEY = 'sp_email';
-const SUPABASE_OAUTH_STORAGE_KEY = 'sp-oauth-session';
+import { readDashboardAuthSession } from './workspaceAuth';
+export { isDashboardBridgeOrigin } from './workspaceAuth';
 
 type RuntimeMessageSender = <T>(message: StudyPilotRuntimeMessage) => Promise<T | null>;
 type Notice = (message: string, duration?: number) => void;
@@ -278,79 +273,4 @@ export function useDashboardWorkspace({
     addInFlightChat,
     removeInFlightChat,
   };
-}
-
-export function isDashboardBridgeOrigin(): boolean {
-  try {
-    return window.location.origin === new URL(DASHBOARD_URL).origin;
-  } catch {
-    return false;
-  }
-}
-
-function readDashboardAuthSession(): ExtensionAuthSession | null {
-  if (!isDashboardBridgeOrigin()) return null;
-
-  try {
-    const accessToken = window.localStorage.getItem(ACCESS_KEY);
-    if (accessToken) {
-      return {
-        access_token: accessToken,
-        refresh_token: window.localStorage.getItem(REFRESH_KEY) ?? undefined,
-        user_id: window.localStorage.getItem(USER_ID_KEY) ?? undefined,
-        email: window.localStorage.getItem(EMAIL_KEY),
-      };
-    }
-
-    return readSupabaseStoredAuthSession();
-  } catch {
-    return null;
-  }
-}
-
-function readSupabaseStoredAuthSession(): ExtensionAuthSession | null {
-  const candidateKeys = Object.keys(window.localStorage).filter(
-    key => key === SUPABASE_OAUTH_STORAGE_KEY || /^sb-.+-auth-token$/.test(key),
-  );
-
-  for (const key of candidateKeys) {
-    const stored = window.localStorage.getItem(key);
-    if (!stored) continue;
-
-    try {
-      const parsed = JSON.parse(stored) as unknown;
-      const session = getStoredSupabaseSession(parsed);
-      if (session) return session;
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
-
-function getStoredSupabaseSession(value: unknown): ExtensionAuthSession | null {
-  if (!isObject(value)) return null;
-
-  const sessionValue =
-    isObject(value.currentSession) ? value.currentSession :
-    isObject(value.session) ? value.session :
-    value;
-
-  if (!isObject(sessionValue) || typeof sessionValue.access_token !== 'string') {
-    return null;
-  }
-
-  const user = isObject(sessionValue.user) ? sessionValue.user : null;
-  return {
-    access_token: sessionValue.access_token,
-    refresh_token: typeof sessionValue.refresh_token === 'string' ? sessionValue.refresh_token : undefined,
-    user_id: typeof user?.id === 'string' ? user.id : undefined,
-    email: typeof user?.email === 'string' ? user.email : null,
-    expires_at: typeof sessionValue.expires_at === 'number' ? sessionValue.expires_at : undefined,
-  };
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
