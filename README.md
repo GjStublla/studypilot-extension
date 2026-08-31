@@ -9,6 +9,17 @@ Live microphone audio is processed by Google Vertex AI while Live is active. Scr
 > **This repository (`studypilot-extension`) is the canonical Chrome extension.**  
 > The sibling `studypilot/extension` folder is a Live scaffold/mirror only — do not treat it as the shipping source of truth.
 
+## UEP judging evidence
+
+The web repository maintains the current
+[judging evidence matrix](https://github.com/GjStublla/studypilot/blob/bismilah/docs/submission/judging-evidence-matrix.md),
+[system architecture](https://github.com/GjStublla/studypilot/blob/bismilah/docs/architecture/system.png),
+[final report draft](https://github.com/GjStublla/studypilot/blob/bismilah/docs/submission/final-report-content.md),
+and [demo script](https://github.com/GjStublla/studypilot/blob/bismilah/docs/submission/demo-script.md).
+This repository supplies the independently testable MV3 implementation evidence:
+typed builds, manifest policy validation, unit coverage, and real unpacked-extension
+Playwright flows.
+
 ## Local quality gate
 
 Run the non-hosted baseline before opening a pull request:
