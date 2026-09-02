@@ -932,7 +932,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
           },
           originSurface: 'extension',
           clientContext: {
-            page: { title: page.sourceTitle, url: page.sourceUrl },
+            page: { title: page.sourceTitle, url: page.sourceUrl, text: page.pageText },
             action,
             selection: page.selectedText,
             integrity: 'extension-v1',

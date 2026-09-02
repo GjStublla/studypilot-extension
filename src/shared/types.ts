@@ -177,6 +177,8 @@ export interface CoachingClientContext {
   page: {
     title: string;
     url?: string;
+    /** Readable page body text, capped at ~6000 chars. */
+    text?: string;
   };
   action: StudyAction;
   selection?: string;

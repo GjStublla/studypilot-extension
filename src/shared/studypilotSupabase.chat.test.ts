@@ -62,6 +62,33 @@ describe('parseCoachingSseStream', () => {
     );
   });
 
+  it('rejects a commit with a different chatId when caller supplied one', async () => {
+    const differentChatId = crypto.randomUUID();
+    const stream = sseStream(
+      `data: ${JSON.stringify(commit({ chatId: differentChatId }))}\n`,
+      'data: [DONE]\n\n',
+    );
+
+    await expect(parseCoachingSseStream(stream, { chatId, requestId })).rejects.toThrow(
+      'commit for a different request',
+    );
+  });
+
+  it('accepts a server-assigned chatId when caller sent no chatId (first message)', async () => {
+    // The panel sends chatId: undefined on first use; expected.chatId becomes ''.
+    // The server auto-creates a chat and returns a real UUID in the commit.
+    // This must NOT throw.
+    const serverAssignedChatId = crypto.randomUUID();
+    const stream = sseStream(
+      `data: ${JSON.stringify(commit({ chatId: serverAssignedChatId }))}\n`,
+      'data: [DONE]\n\n',
+    );
+
+    await expect(parseCoachingSseStream(stream, { chatId: '', requestId })).resolves.toMatchObject({
+      commit: expect.objectContaining({ chatId: serverAssignedChatId }),
+    });
+  });
+
   it('rejects a connection that closes before done', async () => {
     const stream = sseStream(`data: ${JSON.stringify(commit())}\n`);
 

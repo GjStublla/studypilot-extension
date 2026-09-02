@@ -310,7 +310,11 @@ export async function parseCoachingSseStream(
 
     if (hasStringProperty(parsed, 'error')) throw new Error(parsed.error);
     if (isCoachingCommit(parsed)) {
-      if (parsed.chatId !== expected.chatId || parsed.requestId !== expected.requestId) {
+      // Only enforce chatId equality when the caller supplied one. When no chatId
+      // was sent the server auto-creates a chat and the returned id will differ
+      // from the empty-string fallback — that is expected and correct behaviour.
+      const chatIdMismatch = expected.chatId !== '' && parsed.chatId !== expected.chatId;
+      if (chatIdMismatch || parsed.requestId !== expected.requestId) {
         throw new Error('StudyPilot AI returned a commit for a different request.');
       }
       commit = parsed;
