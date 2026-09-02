@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, type Variants } from 'framer-motion';
 import { Camera, Send, X } from 'lucide-react';
-import type { ChangeEvent, ClipboardEvent, RefObject } from 'react';
+import { type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type RefObject, useEffect, useRef } from 'react';
 
 export interface ComposerPanelProps {
   pendingScreenshots: string[];
@@ -27,6 +27,24 @@ export function ComposerPanel({
   onQuestionChange,
   onSubmit,
 }: ComposerPanelProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Resize the textarea to fit its content every time `question` changes.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [question]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Submit on Enter without Shift; allow Shift+Enter for newlines.
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      onSubmit();
+    }
+  }
+
   return (
     <div className="sp-paste-zone" onPaste={onPaste}>
       <AnimatePresence>
@@ -78,18 +96,15 @@ export function ComposerPanel({
           tabIndex={-1}
           onChange={onFileInputChange}
         />
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
+          className="sp-composer-textarea"
           value={question}
           placeholder="Ask a question or paste an image…"
           aria-label="Ask a question"
+          rows={1}
           onChange={(event) => onQuestionChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              onSubmit();
-            }
-          }}
+          onKeyDown={handleKeyDown}
         />
         <button
           type="button"

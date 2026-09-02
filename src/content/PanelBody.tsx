@@ -30,6 +30,7 @@ export interface PanelBodyProps {
   isRefreshingChats: boolean;
   liveFrozen: boolean;
   liveBusy: boolean;
+  lastQuestion: string;
   studyMode: StudyMode | null;
   studyLoading: boolean;
   studyError: string | null;
@@ -96,13 +97,14 @@ const sectionReveal: Variants = {
 export function PanelBody({
   authConnected,
   activeChatId,
-  activeChat,
-  chatMessages,
+  activeChat: _activeChat,
+  chatMessages: _chatMessages,
   sharedContext,
   isCreatingChat,
   isRefreshingChats,
   liveFrozen,
   liveBusy,
+  lastQuestion,
   studyMode,
   studyLoading,
   studyError,
@@ -169,7 +171,7 @@ export function PanelBody({
       {authConnected ? (
         <ChatSwitcher
           activeChatId={activeChatId}
-          activeChat={activeChat}
+          activeChat={_activeChat}
           sharedContext={sharedContext}
           disabled={liveFrozen || liveBusy}
           isCreatingChat={isCreatingChat}
@@ -263,21 +265,11 @@ export function PanelBody({
             />
           </motion.div>
 
-          {activeChat && chatMessages.length > 0 ? (
-            <motion.section className="sp-chat-history" variants={sectionReveal} aria-label="Shared chat history">
-              <div className="sp-chat-history-head">
-                <strong>{activeChat.title}</strong>
-                <span>{chatMessages.length} messages</span>
-              </div>
-              <div className="sp-chat-history-list">
-                {chatMessages.slice(-10).map((message) => (
-                  <article key={message.id} data-role={message.role}>
-                    <span>{message.role === 'user' ? 'You' : 'Coach'}</span>
-                    <p>{message.text}</p>
-                  </article>
-                ))}
-              </div>
-            </motion.section>
+          {lastQuestion.trim() ? (
+            <motion.div className="sp-last-question" variants={sectionReveal}>
+              <span className="sp-last-question-label">You asked</span>
+              <p className="sp-last-question-text">{lastQuestion.trim()}</p>
+            </motion.div>
           ) : null}
 
           <PomodoroPicker

@@ -1107,7 +1107,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
           context: { ...context, screenshot: false, pageUrl: true, selectedText: false },
           originSurface: 'extension',
           clientContext: {
-            page: { title: freshPage.sourceTitle, url: freshPage.sourceUrl },
+            page: { title: freshPage.sourceTitle, url: freshPage.sourceUrl, text: freshPage.pageText },
             action,
             selection: undefined,
             integrity: 'extension-v1',
@@ -1484,6 +1484,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
                 isRefreshingChats={isRefreshingChats}
                 liveFrozen={liveFrozen}
                 liveBusy={liveBusy}
+                lastQuestion={lastQuestion}
                 studyMode={studyMode}
                 studyLoading={studyLoading}
                 studyError={studyError}

@@ -613,11 +613,11 @@
 .sp-composer {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) 38px;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
-  height: 50px;
-  padding: 6px 6px 6px 14px;
-  border-radius: 999px;
+  min-height: 50px;
+  padding: 8px 6px 8px 14px;
+  border-radius: 18px;
   border: 1.4px solid transparent;
   background-image:
     linear-gradient(rgba(6, 8, 18, 0.92), rgba(6, 8, 18, 0.92)),
@@ -816,6 +816,36 @@
 }
 
 /* ------------------------------------------------------------- answer card */
+
+/* --------------------------------------------------------- last question */
+
+.sp-last-question {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(148, 163, 205, 0.1);
+}
+
+.sp-last-question-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--sp-quiet);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.sp-last-question-text {
+  margin: 0;
+  color: var(--sp-text);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
 
 .sp-card {
   padding: 14px 16px 12px;
