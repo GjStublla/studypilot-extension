@@ -20,6 +20,7 @@ export interface PageContext {
 
 export interface ContextShareSettings {
   screenshot: boolean;
+  pageContent: boolean;
   pageUrl: boolean;
   selectedText: boolean;
   saveToDashboard: boolean;
@@ -39,6 +40,7 @@ export const DEFAULT_SESSION_PRIVACY: SessionPrivacyOptions = {
 
 export const DEFAULT_CONTEXT_SHARE_SETTINGS: ContextShareSettings = {
   screenshot: DEFAULT_SESSION_PRIVACY.captureScreenshot,
+  pageContent: true,
   pageUrl: true,
   selectedText: false,
   saveToDashboard: DEFAULT_SESSION_PRIVACY.saveToDashboard,

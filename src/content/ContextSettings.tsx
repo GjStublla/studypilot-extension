@@ -14,7 +14,7 @@ export function SettingsSheet({
   onOpenDashboard: () => void;
 }) {
   const setFlag =
-    (key: keyof Pick<ContextShareSettings, 'screenshot' | 'pageUrl' | 'selectedText' | 'saveToDashboard'>) =>
+    (key: keyof Pick<ContextShareSettings, 'screenshot' | 'pageContent' | 'pageUrl' | 'selectedText' | 'saveToDashboard'>) =>
     (event: ChangeEvent<HTMLInputElement>) => {
       onChange((prev) => ({ ...prev, [key]: event.target.checked }));
     };
@@ -27,13 +27,20 @@ export function SettingsSheet({
       </div>
 
       <p className="sp-settings-copy">
-        Microphone audio is sent to Google Vertex AI while Live is active. Screenshots are sent only when enabled. Chat
-        and session history save only when “Save to dashboard” is enabled.
+        Microphone audio is sent to Google Vertex AI while Live is active. Screenshots are sent only when enabled. AI
+        chats may be retained to provide conversation continuity; “Save to dashboard” controls session and capture
+        syncing.
       </p>
 
       <div className="sp-settings-group">
         <p className="sp-settings-group-label">Page context</p>
         <div className="sp-settings-toggles">
+          <TogglePill
+            name="pageContent"
+            label={context.pageContent ? 'Page content' : 'No page content'}
+            checked={context.pageContent}
+            onChange={setFlag('pageContent')}
+          />
           <TogglePill name="pageUrl" label="Page URL" checked={context.pageUrl} onChange={setFlag('pageUrl')} />
           <TogglePill
             name="selectedText"

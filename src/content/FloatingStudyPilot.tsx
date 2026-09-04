@@ -75,6 +75,19 @@ function isExtensionRuntime(): boolean {
   );
 }
 
+export function buildCoachingClientContext(page: PageContext, context: ContextShareSettings, action: StudyAction) {
+  return {
+    page: {
+      title: page.sourceTitle,
+      ...(context.pageUrl ? { url: page.sourceUrl } : {}),
+      ...(context.pageContent ? { text: page.pageText } : {}),
+    },
+    action,
+    ...(context.selectedText ? { selection: page.selectedText } : {}),
+    integrity: 'extension-v1',
+  };
+}
+
 async function sendRuntimeMessage<T>(message: StudyPilotRuntimeMessage): Promise<T | null> {
   if (!isExtensionRuntime()) return null;
   const response = await chrome.runtime.sendMessage(message);
@@ -931,12 +944,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
             screenshot: context.screenshot && attachedImages.length === 0,
           },
           originSurface: 'extension',
-          clientContext: {
-            page: { title: page.sourceTitle, url: page.sourceUrl, text: page.pageText },
-            action,
-            selection: page.selectedText,
-            integrity: 'extension-v1',
-          },
+          clientContext: buildCoachingClientContext(page, context, action),
           images: attachedImages,
           screenshotDataUrl: attachedScreenshots[0],
         } as CoachingRequest,
@@ -1012,6 +1020,7 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
         title: response.title || titleForAction(action, prompt),
         body: responseText,
         action,
+        createdAt: new Date().toISOString(),
       });
       setCardOpen(true);
       setPhase('answer');
@@ -1104,14 +1113,13 @@ export function FloatingStudyPilot({ defaultOpen = false }: { defaultOpen?: bool
           question: studentText,
           userMessage: studentText,
           page: freshPage,
-          context: { ...context, screenshot: false, pageUrl: true, selectedText: false },
+          context: { ...context, screenshot: false, selectedText: Boolean(overrideText) && context.selectedText },
           originSurface: 'extension',
-          clientContext: {
-            page: { title: freshPage.sourceTitle, url: freshPage.sourceUrl, text: freshPage.pageText },
-            action,
-            selection: undefined,
-            integrity: 'extension-v1',
-          },
+          clientContext: buildCoachingClientContext(freshPage, {
+            ...context,
+            screenshot: false,
+            selectedText: Boolean(overrideText) && context.selectedText,
+          }, action),
           images: [],
         } as CoachingRequest,
       });
