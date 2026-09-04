@@ -8,6 +8,7 @@ export interface AnswerCardData {
   title: string;
   body: string;
   action?: StudyAction;
+  createdAt?: string;
 }
 
 export type AnswerFeedback = 'up' | 'down' | null;
@@ -54,7 +55,7 @@ export function AnswerCardPanel({
     <motion.section className="sp-card" variants={answerCardReveal} data-thinking={thinking}>
       <button type="button" className="sp-card-head" aria-expanded={cardOpen} onClick={onToggleOpen}>
         <strong>{card.title}</strong>
-        <span className="sp-card-time">Just now</span>
+        <span className="sp-card-time">{formatAnswerTimestamp(card.createdAt)}</span>
         <ChevronDown size={20} className="sp-card-chevron" data-open={cardOpen} aria-hidden="true" />
       </button>
 
@@ -120,6 +121,47 @@ export function AnswerCardPanel({
       </AnimatePresence>
     </motion.section>
   );
+}
+
+export function formatAnswerTimestamp(createdAt: string | undefined, now = new Date()): string {
+  if (!createdAt) return 'Just now';
+  const created = new Date(createdAt);
+  if (Number.isNaN(created.getTime())) return 'Just now';
+
+  const elapsedMs = Math.max(0, now.getTime() - created.getTime());
+  const elapsedMinutes = Math.floor(elapsedMs / 60000);
+  if (elapsedMinutes < 1) return 'Just now';
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 6) return `${elapsedHours} hr ago`;
+
+  const sameDate =
+    created.getFullYear() === now.getFullYear() &&
+    created.getMonth() === now.getMonth() &&
+    created.getDate() === now.getDate();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const wasYesterday =
+    created.getFullYear() === yesterday.getFullYear() &&
+    created.getMonth() === yesterday.getMonth() &&
+    created.getDate() === yesterday.getDate();
+
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(created);
+
+  if (sameDate) return `Today · ${time}`;
+  if (wasYesterday) return `Yesterday · ${time}`;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(created);
 }
 
 function renderMarkdown(text: string): ReactNode[] {

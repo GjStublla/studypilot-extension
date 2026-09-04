@@ -4,6 +4,7 @@ import { ExplainGlyph, FlashcardsGlyph, QuizGlyph, QuickChip, SummarizeGlyph } f
 
 export interface QuickActionsProps {
   sharedContext: SharedChatContext | null;
+  disabled?: boolean;
   pomodoroRemaining: number | null;
   formatTime: (seconds: number) => string;
   onRunStudyAction: (action: StudyAction) => void;
@@ -15,6 +16,7 @@ export interface QuickActionsProps {
 
 export function QuickActions({
   sharedContext,
+  disabled = false,
   pomodoroRemaining,
   formatTime,
   onRunStudyAction,
@@ -25,20 +27,20 @@ export function QuickActions({
 }: QuickActionsProps) {
   return (
     <>
-      <QuickChip label="Summarize" onClick={() => onRunStudyAction('summarize')}>
+      <QuickChip label="Summarize" disabled={disabled} onClick={() => onRunStudyAction('summarize')}>
         <SummarizeGlyph />
       </QuickChip>
-      <QuickChip label="Explain" onClick={() => onRunStudyAction('explain')}>
+      <QuickChip label="Explain" disabled={disabled} onClick={() => onRunStudyAction('explain')}>
         <ExplainGlyph />
       </QuickChip>
-      <QuickChip label="Quiz Me" onClick={() => onOpenStudyMode('quiz')}>
+      <QuickChip label="Quiz Me" disabled={disabled} onClick={() => onOpenStudyMode('quiz')}>
         <QuizGlyph />
       </QuickChip>
-      <QuickChip label="Flashcards" onClick={() => onOpenStudyMode('flashcards')}>
+      <QuickChip label="Flashcards" disabled={disabled} onClick={() => onOpenStudyMode('flashcards')}>
         <FlashcardsGlyph />
       </QuickChip>
       {sharedContext?.sessions[0] ? (
-        <QuickChip label="Continue session" onClick={() => onContinueSession(sharedContext.sessions[0])}>
+        <QuickChip label="Continue session" disabled={disabled} onClick={() => onContinueSession(sharedContext.sessions[0])}>
           <BookmarkCheck size={14} strokeWidth={2.2} />
         </QuickChip>
       ) : null}

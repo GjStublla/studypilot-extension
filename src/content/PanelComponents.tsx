@@ -295,9 +295,19 @@ export function MenuItem({ icon, label, onClick }: { icon: ReactNode; label: str
   );
 }
 
-export function QuickChip({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+export function QuickChip({
+  label,
+  onClick,
+  children,
+  disabled = false,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  disabled?: boolean;
+}) {
   return (
-    <button type="button" className="sp-chip" onClick={onClick}>
+    <button type="button" className="sp-chip" onClick={onClick} disabled={disabled}>
       {children}
       <span>{label}</span>
     </button>

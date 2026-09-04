@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { SettingsSheet } from './FloatingStudyPilot';
+import { buildCoachingClientContext, SettingsSheet } from './FloatingStudyPilot';
 import {
   DEFAULT_CONTEXT_SHARE_SETTINGS,
   DEFAULT_SESSION_PRIVACY,
@@ -13,6 +13,7 @@ const page: PageContext = {
   sourceTitle: 'Lecture',
   host: 'example.test',
   selectedText: 'photosynthesis',
+  pageText: 'Photosynthesis converts light energy into chemical energy.',
 };
 
 describe('session privacy defaults', () => {
@@ -22,6 +23,7 @@ describe('session privacy defaults', () => {
       saveToDashboard: false,
     });
     expect(DEFAULT_CONTEXT_SHARE_SETTINGS.screenshot).toBe(false);
+    expect(DEFAULT_CONTEXT_SHARE_SETTINGS.pageContent).toBe(true);
     expect(DEFAULT_CONTEXT_SHARE_SETTINGS.saveToDashboard).toBe(false);
     expect(sessionPrivacyFromContext(DEFAULT_CONTEXT_SHARE_SETTINGS)).toEqual({
       captureScreenshot: false,
@@ -62,12 +64,14 @@ describe('session privacy defaults', () => {
     expect(html).toContain('Save to dashboard');
     expect(html).toContain('Page context');
     expect(html).toContain('Capture and saving');
+    expect(html).toContain('name="pageContent"');
     expect(html).toContain('name="pageUrl"');
     expect(html).toContain('name="selectedText"');
     expect(html).toContain('name="screenshot"');
     expect(html).toContain('name="saveToDashboard"');
     expect(html).not.toMatch(/name="screenshot"[^>]*checked/);
     expect(html).not.toMatch(/name="saveToDashboard"[^>]*checked/);
+    expect(html).toMatch(/name="pageContent"[^>]*checked/);
     expect(html).toMatch(/name="pageUrl"[^>]*checked/);
   });
 
@@ -97,5 +101,24 @@ describe('session privacy defaults', () => {
 
     expect(html).toMatch(/name="saveToDashboard"[^>]*checked/);
     expect(html).not.toMatch(/name="screenshot"[^>]*checked/);
+  });
+
+  it('omits disabled page context from the coaching payload', () => {
+    expect(
+      buildCoachingClientContext(
+        page,
+        {
+          ...DEFAULT_CONTEXT_SHARE_SETTINGS,
+          pageContent: false,
+          pageUrl: false,
+          selectedText: false,
+        },
+        'summarize',
+      ),
+    ).toEqual({
+      page: { title: 'Lecture' },
+      action: 'summarize',
+      integrity: 'extension-v1',
+    });
   });
 });

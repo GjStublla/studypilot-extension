@@ -255,6 +255,7 @@ export function PanelBody({
           <motion.div className="sp-chips" variants={sectionReveal}>
             <QuickActions
               sharedContext={sharedContext}
+              disabled={thinking || studyLoading || liveBusy}
               pomodoroRemaining={pomodoroRemaining}
               formatTime={formatTime}
               onRunStudyAction={onRunStudyAction}
