@@ -206,6 +206,8 @@ export class LiveClient {
     if (this.ws) {
       throw new Error('Live already connected in this profile — stop first');
     }
+    
+    this.stopMicTracks();
 
     this.closing = false;
     this.paused = false;
@@ -247,12 +249,22 @@ export class LiveClient {
     };
 
     // Only wait for clientContent history when we will seed it. On resumption,
-    // do not set initialHistoryInClientContent (server would block forever).
-    if (opts.seedHistoryAndScreenshot) {
-      setup.historyConfig = {
-        initialHistoryInClientContent: true,
-      };
+    // do not set initialHistoryInClientContent (server would block forever).`// Startup order after connect: client history -> video screenshot -> mic.
+    if (opts.seedHistoryAndScreenshot && this.pendingSeed) {
+      await this.seedInitialContent(this.pendingSeed.turns, this.pendingSeed.screenshotJpegBase64);
+      this.pendingSeed = null;
+    } else {
+      // FIX: When not seeding history (e.g. follow-up turn/resumption), 
+      // explicitly tell the server we are done with initial history so it unblocks.
+      this.sendJson({
+        clientContent: {
+          turns: [],
+          turnComplete: true,
+        },
+      });
     }
+
+    await this.startMic();
 
     if (opts.bootstrap.systemInstruction) {
       setup.systemInstruction = {
